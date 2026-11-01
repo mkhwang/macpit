@@ -4,7 +4,7 @@
 # version·sha256 은 릴리스 워크플로가 갱신한다.
 cask "macmon" do
   version "0.1.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "45a72d3196b37e1e55a39c3387bfce6883a57173b023a8abc6ccea36e8f281af"
 
   url "https://github.com/mkhwang/macmon/releases/download/v#{version}/MacMon-#{version}.dmg"
   name "MacMon"
