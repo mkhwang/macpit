@@ -1,0 +1,26 @@
+name: Bug report
+description: Something is broken. 버그 제보.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: env
+    attributes:
+      label: MacMon version, model identifier (`sysctl -n hw.model`), macOS version
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`macmonctl status`, last lines of /var/log/macmond.log"
+      render: text

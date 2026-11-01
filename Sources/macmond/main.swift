@@ -5,7 +5,7 @@ import MacMonCore
 // 1초 제어 루프 구조:
 //   주기적으로 F{n}Md=1(강제) + F{n}Tg(목표 RPM) 재기록, 안전 온도·센서 실패 시 system 반납, 종료 시 반납.
 
-let version = "0.1.0"
+let version = macmonVersion
 setvbuf(stdout, nil, _IOLBF, 0)
 
 func log(_ s: String) {

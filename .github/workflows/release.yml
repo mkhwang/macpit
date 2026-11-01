@@ -1,0 +1,38 @@
+name: Release
+# v* 태그 push → DMG·zip 빌드 → GitHub Release 생성 → Homebrew cask 버전·sha256 갱신
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Check version matches source
+        run: grep -q "macmonVersion = \"$VERSION\"" Sources/MacMonCore/Version.swift
+      - name: Selftest
+        run: swift run macmon-selftest
+      - name: Package
+        run: ./scripts/package.sh
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/dist/* \
+            --title "MacMon $VERSION" --generate-notes \
+            --notes-file .github/release-notes.md
+      - name: Update cask
+        run: |
+          SHA=$(shasum -a 256 "build/dist/MacMon-$VERSION.dmg" | cut -d' ' -f1)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main && git checkout main
+          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/macmon.rb
+          git add Casks/macmon.rb
+          git diff --cached --quiet || { git commit -m "cask: $VERSION"; git push origin main; }

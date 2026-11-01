@@ -1,0 +1,43 @@
+name: Device report (fan control / sensors)
+description: Tell us whether fan control and sensor groups work on your Mac. 기종별 동작 제보.
+title: "[device] "
+labels: [device-report]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Model identifier
+      description: "`sysctl -n hw.model` (e.g. Mac15,6)"
+    validations:
+      required: true
+  - type: input
+    id: chip
+    attributes:
+      label: Chip and macOS version
+      placeholder: M3 Pro, macOS 15.5
+    validations:
+      required: true
+  - type: dropdown
+    id: fan
+    attributes:
+      label: Fan control result
+      options:
+        - Works (manual % changes RPM, "system" returns control to macOS)
+        - Partly works
+        - Does not work
+        - Fanless Mac (monitoring only)
+        - Did not install the fan helper
+    validations:
+      required: true
+  - type: textarea
+    id: sensors
+    attributes:
+      label: "`macmonctl sensors` output"
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything odd — wrong temperatures, missing groups, fans not spinning down, log lines from /var/log/macmond.log

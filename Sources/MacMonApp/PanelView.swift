@@ -191,6 +191,33 @@ struct PanelView: View {
             } else if let e = m.daemonError {
                 Text(e).font(.caption2).foregroundStyle(.orange)
             }
+            setupRow
+        }
+    }
+
+    /// 데몬 미설치·구버전 → 설치 버튼, 미검증 기종 → 제보 링크
+    @ViewBuilder var setupRow: some View {
+        if m.daemon == nil || m.daemonOutdated {
+            HStack {
+                Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macmonVersion))…") {
+                    m.setupDaemon(.install)
+                }
+                .disabled(m.setupBusy || !DaemonSetup.available)
+                if m.setupBusy { ProgressView().controlSize(.small) }
+            }
+            .font(.caption)
+            Text(DaemonSetup.available ? "관리자 암호가 필요합니다. 모니터링·정리는 설치 없이 동작합니다."
+                                       : "이 실행 파일에는 데몬이 동봉되어 있지 않습니다. scripts/install.sh 를 쓰세요.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if let msg = m.setupMessage { Text(msg).font(.caption2).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+        if !m.modelTested && !m.thermal.fans.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text("\(m.model) 은 팬 제어 미검증 기종").foregroundStyle(.secondary)
+                Link("결과 제보", destination: Links.deviceReport)
+            }
+            .font(.caption2)
         }
     }
 
@@ -247,7 +274,8 @@ struct PanelView: View {
         HStack {
             Text(m.daemon.map { "macmond \($0.version)" } ?? "macmond 없음").font(.caption2).foregroundStyle(.secondary)
             Spacer()
-            Menu("메뉴바") {
+            Menu("설정") {
+                Text("메뉴바 표시")
                 ForEach(BarItem.allCases) { item in
                     Toggle(item.label, isOn: Binding(
                         get: { m.barItems.contains(item) },
@@ -258,6 +286,13 @@ struct PanelView: View {
                 }
                 Divider()
                 Button("기본값 (CPU·온도·메모리·팬)") { m.barItems = BarItem.defaults }
+                Divider()
+                Toggle("로그인 시 실행", isOn: Binding(get: { m.loginEnabled }, set: { m.setLogin($0) }))
+                if m.daemon != nil {
+                    Button("팬 제어 데몬 제거…") { m.setupDaemon(.uninstall) }.disabled(m.setupBusy || !DaemonSetup.available)
+                }
+                Divider()
+                Link("GitHub · 문제 제보", destination: Links.repo)
             }
             .menuStyle(.borderlessButton).fixedSize().font(.caption)
             Button("히스토리…") { HistoryWindow.show() }.buttonStyle(.borderless).font(.caption)

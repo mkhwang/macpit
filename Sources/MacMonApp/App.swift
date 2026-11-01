@@ -8,6 +8,14 @@ final class Monitor: ObservableObject {
     @Published var sys = SystemSample()
     @Published var daemon: DaemonStatus?
     @Published var daemonError: String?
+    /// 데몬 설치/제거 진행 상태
+    @Published var setupBusy = false
+    @Published var setupMessage: String?
+    @Published var loginEnabled = LoginItem.enabled
+    let model = hardwareModel()
+    var modelTested: Bool { fanControlTestedModels.contains(model) }
+    /// 데몬이 앱과 다른 버전이면 재설치 권장
+    var daemonOutdated: Bool { daemon.map { $0.version != macmonVersion } ?? false }
     @Published var tempHistory: [Double] = []
     @Published var cpuHistory: [Double] = []
     @Published var config = FanConfig()
@@ -59,6 +67,20 @@ final class Monitor: ObservableObject {
             } catch { err = "데몬 미설치/중지 — 팬 제어 불가 (모니터링만)" }
             Task { @MainActor in self.apply(t, s, st, err) }
         }
+    }
+
+    func setupDaemon(_ action: DaemonSetup.Action) {
+        setupBusy = true; setupMessage = nil
+        DaemonSetup.run(action) { ok, msg in
+            self.setupBusy = false
+            self.setupMessage = ok ? nil : msg
+            self.refresh()
+        }
+    }
+
+    func setLogin(_ on: Bool) {
+        setupMessage = LoginItem.set(on)
+        loginEnabled = LoginItem.enabled
     }
 
     private func apply(_ t: ThermalSnapshot, _ s: SystemSample, _ st: DaemonStatus?, _ err: String?) {
