@@ -8,7 +8,7 @@ import MacPitCore
 //   macpitctl system             팬을 macOS 에 반납
 //   macpitctl manual <0-100>     고정 %
 //   macpitctl target <°C>        목표 온도 유지
-//   macpitctl curve quiet|balanced|performance
+//   macpitctl profile quiet|balanced|performance   (curve 도 동일)
 
 func f(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "-" }
 
@@ -64,7 +64,7 @@ case "manual":
 case "target":
     guard args.count > 1, let t = Double(args[1]) else { print("usage: target <celsius>"); exit(1) }
     var c = current(); c.mode = .target; c.targetTemp = t; daemon(DaemonRequest(cmd: "setConfig", config: c))
-case "curve":
+case "profile", "curve":
     var c = current(); c.mode = .curve
     switch args.count > 1 ? args[1] : "balanced" {
     case "quiet": c.curve = FanConfig.quietCurve
@@ -134,5 +134,5 @@ case "clean":
     }
     print("총 \(formatBytes(Double(total))) 확보")
 default:
-    print("usage: macpitctl sensors|keys [prefix]|status|system|manual <%>|target <°C>|curve <preset>|top|history [1h|24h|7d|30d]|storage|clean <id...>|safe [--yes]")
+    print("usage: macpitctl sensors|keys [prefix]|status|system|manual <%>|target <°C>|profile <quiet|balanced|performance>|top|history [1h|24h|7d|30d]|storage|clean <id...>|safe [--yes]")
 }

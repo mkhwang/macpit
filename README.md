@@ -9,7 +9,7 @@
 A free, open-source menu bar app for Apple Silicon Macs that does three things in one place:
 
 - **Temperatures** — CPU/GPU plus sensor groups (memory, SSD, battery, airflow, palm rest …), with 30-day history.
-- **Fan control** — manual %, temperature curves, or **hold a target temperature** with a PI controller. Fans go back to macOS whenever MacPit is not sure.
+- **Fan control** — manual %, temperature profiles (quiet / balanced / performance), or **hold a target temperature** with a PI controller. Fans go back to macOS whenever MacPit is not sure.
 - **Developer cache cleanup** — see and reclaim space from npm, pnpm, Gradle, Maven, JetBrains, Xcode DerivedData, Docker and more.
 
 <p>
@@ -58,7 +58,7 @@ sudo ./scripts/install.sh   # fan helper + ~/Applications/MacPit.app + open at l
 | Open source | ✅ MIT | ✅ MIT | — | — |
 | Price | Free | Free | Free / Pro | Paid |
 | Menu bar sensors | ✅ grouped | ✅ | ✅ | ✅ |
-| Fan control on Apple Silicon | ✅ manual · curve · target temp | legacy, marked unmaintained | ✅ | ✅ |
+| Fan control on Apple Silicon | ✅ manual · profile · target temp | legacy, marked unmaintained | ✅ | ✅ |
 | Developer cache & Docker cleanup | ✅ | — | — | — |
 
 Stats is the better general-purpose system monitor. MacPit is for developers who want fan control and cache cleanup without paying for two apps.
@@ -75,7 +75,7 @@ Stats is the better general-purpose system monitor. MacPit is for developers who
 |---|---|
 | System | macOS manages the fans (default) |
 | Manual | Fixed 0–100% (0% = minimum RPM) |
-| Curve | Temperature → fan % presets: quiet, balanced, performance |
+| Profile | Temperature → fan % presets: quiet, balanced, performance. The panel draws the profile and where you are on it |
 | Target temp | Keeps the hottest CPU core near a target with a PI loop, hands back to macOS once cool |
 
 Safety:
@@ -110,7 +110,7 @@ macpitctl sensors              # temperatures, sensor groups, fans (no root need
 macpitctl status               # helper status
 macpitctl manual 60            # fans at 60%
 macpitctl target 70            # hold CPU at 70°C
-macpitctl curve balanced       # quiet | balanced | performance
+macpitctl profile balanced     # quiet | balanced | performance
 macpitctl system               # give fans back to macOS
 macpitctl storage              # cache and Docker usage
 macpitctl clean safe           # preview only, deletes nothing
@@ -123,7 +123,7 @@ macpitctl top                  # top processes
 
 | Model | Chip | Fans | Result |
 |---|---|---|---|
-| `MacBookPro18,1` | M1 Pro | 2 | manual, curve, target temp and hand-back verified |
+| `MacBookPro18,1` | M1 Pro | 2 | manual, profile, target temp and hand-back verified |
 
 On other models fan control is **experimental** and the panel says so. SMC key layouts can change between chips.
 Please [send a device report](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) with the output of `macpitctl sensors`. Each report adds a row here.
@@ -161,7 +161,7 @@ Measured on a MacBook Pro M1 Pro (`MacBookPro18,1`): manual 60% took the fans fr
 | Path | Contents |
 |---|---|
 | `Sources/CSMC` | AppleSMC IOKit user client in C (80-byte `SMCParamStruct`) |
-| `Sources/MacPitCore` | SMC wrapper, sensor and fan detection, fan policy (curve, PI), IPC, stats, cleanup, history |
+| `Sources/MacPitCore` | SMC wrapper, sensor and fan detection, fan policy (profiles, PI), IPC, stats, cleanup, history |
 | `Sources/macpitd` | root LaunchDaemon, the only process that writes to the SMC |
 | `Sources/MacPitApp` | SwiftUI `MenuBarExtra` app |
 | `Sources/macpitctl` | CLI |

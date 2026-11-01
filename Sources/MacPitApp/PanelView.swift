@@ -128,7 +128,7 @@ struct PanelView: View {
                         if !f.controllable { Text("읽기 전용").font(.caption2).foregroundStyle(.secondary) }
                         Spacer()
                         Text("\(Int(f.actual)) rpm").monospacedDigit().font(.callout.weight(.medium))
-                        Text(f.mode == 1 ? "강제" : "자동").font(.caption2).padding(.horizontal, 4)
+                        Text(f.mode == 1 ? "MacPit" : "macOS").font(.caption2).padding(.horizontal, 4)
                             .background(Capsule().fill(f.mode == 1 ? Color.orange.opacity(0.3) : Color.green.opacity(0.25)))
                     }
                     Bar(fraction: f.max > 0 ? f.actual / f.max : 0, color: .blue)
@@ -144,11 +144,13 @@ struct PanelView: View {
             Picker("", selection: Binding(get: { m.config.mode }, set: { var c = m.config; c.mode = $0; m.push(c) })) {
                 Text("시스템").tag(FanMode.system)
                 Text("수동").tag(FanMode.manual)
-                Text("곡선").tag(FanMode.curve)
+                Text("프로필").tag(FanMode.curve)
                 Text("목표온도").tag(FanMode.target)
             }
             .pickerStyle(.segmented).labelsHidden()
             .disabled(m.daemon == nil)
+            // 지금 실제로 무엇을 하고 있는지 (설정이 아니라 데몬의 마지막 결정)
+            if let d = m.daemon { FanStatusCard(status: d) }
 
             switch m.config.mode {
             case .system:
@@ -168,13 +170,18 @@ struct PanelView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 }
             case .curve:
-                HStack {
-                    ForEach([("조용", FanConfig.quietCurve), ("균형", FanConfig.balancedCurve), ("성능", FanConfig.performanceCurve)], id: \.0) { name, curve in
-                        Button(name) { var c = m.config; c.curve = curve; m.push(c) }
-                            .buttonStyle(.bordered).tint(m.config.curve == curve ? .accentColor : .gray)
-                    }
+                // 선택 상태가 확실히 보이도록 세그먼트. 프리셋과 다른 곡선이면 아무것도 선택 안 됨 + "사용자 정의" 표기
+                Picker("", selection: Binding(get: { FanPreset.matching(m.config.curve) },
+                                              set: { if let p = $0 { var c = m.config; c.curve = p.curve; m.push(c) } })) {
+                    ForEach(FanPreset.allCases) { Text($0.name).tag(Optional($0)) }
                 }
-                Text(m.config.curve.map { "\(Int($0.temp))°→\(Int($0.percent))%" }.joined(separator: "  ")).font(.caption2).foregroundStyle(.secondary)
+                .pickerStyle(.segmented).labelsHidden()
+                .disabled(m.daemon == nil)
+                ProfileChart(curve: m.config.curve, temp: m.daemon?.controlTemp ?? m.thermal.cpuMax,
+                             applied: m.daemon?.config.mode == .curve ? m.daemon?.appliedPercent : nil)
+                Text((FanPreset.matching(m.config.curve) == nil ? "사용자 정의 · " : "")
+                     + "온도에 따라 팬 속도를 정합니다. 그래프 시작점(0%) 아래 온도에서는 macOS 에 맡깁니다.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             case .target:
                 HStack {
                     Slider(value: Binding(get: { m.config.targetTemp }, set: { m.config.targetTemp = $0; m.configDirty = true }),
@@ -185,8 +192,6 @@ struct PanelView: View {
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let d = m.daemon {
-                Text("적용: \(d.appliedPercent.map { "\(Int($0))%" } ?? "시스템") · \(d.reason) · 안전 \(Int(d.config.safetyTemp))°C 이상 100%")
-                    .font(.caption2).foregroundStyle(d.reason == "safety" ? .red : .secondary)
                 if let e = d.lastError { Text(e).font(.caption2).foregroundStyle(.red) }
             } else if let e = m.daemonError {
                 Text(e).font(.caption2).foregroundStyle(.orange)

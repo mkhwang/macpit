@@ -30,7 +30,7 @@ Apple Silicon Mac용 메뉴바 시스템 모니터 + **팬 제어** + **개발�
 |---|---|
 | 시스템 | macOS 에 맡김 (기본) |
 | 수동 | 0~100% 고정 (0% = 최소 RPM) |
-| 곡선 | 온도 → 팬% 선형 보간. 조용 / 균형 / 성능 프리셋 |
+| 프로필 | 온도 → 팬% 그래프. 조용 / 균형 / 성능. 패널에 그래프와 현재 위치 표시 |
 | 목표온도 | CPU 온도를 목표치 근처로 유지하는 PI 제어. 충분히 식으면 macOS 에 반납 |
 
 **안전장치**
@@ -71,7 +71,7 @@ macpitctl sensors              # 온도·센서 그룹·팬 (권한 불필요)
 macpitctl status               # 데몬 상태
 macpitctl manual 60            # 팬 60% 고정
 macpitctl target 70            # CPU 70°C 유지
-macpitctl curve balanced       # quiet | balanced | performance
+macpitctl profile balanced     # quiet | balanced | performance
 macpitctl system               # macOS 에 반납
 macpitctl storage              # 캐시·Docker 용량
 macpitctl clean safe           # 미리보기 (삭제 안 함)
@@ -127,7 +127,7 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacPit.app + �
 
 | 기종 | 칩 | 팬 | 결과 |
 |---|---|---|---|
-| `MacBookPro18,1` | M1 Pro | 2 | 수동·곡선·목표온도·반납 확인 |
+| `MacBookPro18,1` | M1 Pro | 2 | 수동·프로필·목표온도·반납 확인 |
 
 그 외 기종은 팬 제어가 **실험적**이다 (패널에 "미검증 기종" 표시). 칩마다 SMC 키 배치가 달라질 수 있다.
 [기종 제보](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) 에 `macpitctl sensors` 출력을 붙여 주면 표에 추가한다.
@@ -148,7 +148,7 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacPit.app + �
 | 경로 | 내용 |
 |---|---|
 | `Sources/CSMC` | AppleSMC IOKit user client (C) — 80바이트 `SMCParamStruct` 읽기/쓰기 |
-| `Sources/MacPitCore` | SMC 래퍼, 센서·팬 감지, 팬 정책(곡선·PI), IPC, 시스템 통계, 스토리지 정리, 히스토리 |
+| `Sources/MacPitCore` | SMC 래퍼, 센서·팬 감지, 팬 정책(프로필·PI), IPC, 시스템 통계, 스토리지 정리, 히스토리 |
 | `Sources/macpitd` | root LaunchDaemon. 유일하게 SMC 에 쓰는 프로세스 |
 | `Sources/MacPitApp` | SwiftUI `MenuBarExtra` 앱 (패널, 스토리지 창, Swift Charts 히스토리 창) |
 | `Sources/macpitctl` | CLI |
