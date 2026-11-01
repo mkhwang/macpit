@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 ./scripts/uninstall-daemon.sh
 if [ -n "${SUDO_UID:-}" ]; then
   H=$(eval echo "~$(id -un "$SUDO_UID")")
-  pkill -f "MacMon.app/Contents/MacOS/MacMon" || true
-  rm -rf "$H/Applications/MacMon.app" "$H/Library/LaunchAgents/com.mkhwang.macmon.plist"
+  pkill -f "MacPit.app/Contents/MacOS/MacPit" || true
+  rm -rf "$H/Applications/MacPit.app" "$H/Library/LaunchAgents/com.mkhwang.macpit.plist" "$H/Library/LaunchAgents/com.mkhwang.macmon.plist"
 fi
 echo "removed"

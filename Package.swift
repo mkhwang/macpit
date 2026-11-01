@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacMon",
+    name: "MacPit",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "macmond", targets: ["macmond"]),
-        .executable(name: "macmonctl", targets: ["macmonctl"]),
-        .executable(name: "MacMonApp", targets: ["MacMonApp"]),
+        .executable(name: "macpitd", targets: ["macpitd"]),
+        .executable(name: "macpitctl", targets: ["macpitctl"]),
+        .executable(name: "MacPitApp", targets: ["MacPitApp"]),
     ],
     targets: [
         .target(name: "CSMC", linkerSettings: [.linkedFramework("IOKit")]),
-        .target(name: "MacMonCore", dependencies: ["CSMC"], linkerSettings: [.linkedLibrary("sqlite3")]),
-        .executableTarget(name: "macmond", dependencies: ["MacMonCore"]),
-        .executableTarget(name: "macmonctl", dependencies: ["MacMonCore"]),
-        .executableTarget(name: "MacMonApp", dependencies: ["MacMonCore"]),
-        .executableTarget(name: "macmon-selftest", dependencies: ["MacMonCore"]),
+        .target(name: "MacPitCore", dependencies: ["CSMC"], linkerSettings: [.linkedLibrary("sqlite3")]),
+        .executableTarget(name: "macpitd", dependencies: ["MacPitCore"]),
+        .executableTarget(name: "macpitctl", dependencies: ["MacPitCore"]),
+        .executableTarget(name: "MacPitApp", dependencies: ["MacPitCore"]),
+        .executableTarget(name: "macpit-selftest", dependencies: ["MacPitCore"]),
     ]
 )

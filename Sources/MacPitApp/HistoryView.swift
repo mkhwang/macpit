@@ -1,17 +1,17 @@
 import AppKit
 import Charts
-import MacMonCore
+import MacPitCore
 import SwiftUI
 
 @MainActor
 final class HistoryModel: ObservableObject {
     static let shared = HistoryModel()
-    @Published var range: HistoryRange = .day { didSet { reload() } }
+    @Published var range: HistoryRange = .day { didSet { if timer != nil { start() } else { reload() } } }
     @Published var points: [HistoryPoint] = []
     @Published var groups: [String: [(Int64, Double)]] = [:]
     @Published var rows = 0
     private let store = HistoryStore()
-    private let q = DispatchQueue(label: "macmon.history")
+    private let q = DispatchQueue(label: "macpit.history")
     private var timer: Timer?
 
     func reload() {
@@ -26,7 +26,8 @@ final class HistoryModel: ObservableObject {
     func start() {
         reload()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in Task { @MainActor in self?.reload() } }
+        // 30d 범위(버킷 2시간)를 30초마다 재집계할 필요 없음 → 버킷 길이에 맞춤 (최소 30초)
+        timer = Timer.scheduledTimer(withTimeInterval: Double(max(30, range.bucket)), repeats: true) { [weak self] _ in Task { @MainActor in self?.reload() } }
     }
     /// 창이 닫히면 차트 데이터도 버린다 (다시 열면 reload)
     func stop() { timer?.invalidate(); timer = nil; points = []; groups = [:] }

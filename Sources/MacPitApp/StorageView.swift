@@ -1,5 +1,5 @@
 import AppKit
-import MacMonCore
+import MacPitCore
 import SwiftUI
 
 /// 스토리지 스캔·정리 상태. 패널 요약과 상세 창이 공유.
@@ -29,7 +29,7 @@ final class StorageModel: ObservableObject {
     }
 
     private let cleaner = StorageCleaner()
-    private let q = DispatchQueue(label: "macmon.storage")
+    private let q = DispatchQueue(label: "macpit.storage", qos: .utility)
     private var timer: Timer?
 
     init() {
@@ -74,14 +74,16 @@ final class StorageModel: ObservableObject {
             var total: Int64 = 0
             var errors: [String] = []
             for t in targets {
+                // 무인 실행은 대상 도구가 켜져 있으면 건너뜀 (빌드 중 Gradle 캐시, 열린 IDE 인덱스 등)
+                if auto, let who = c.busyUser(t) { errors.append("\(t.name): \(who) 실행 중이라 건너뜀"); continue }
                 Task { @MainActor in self.cleaning = t.id }
                 let o = c.clean(t)
                 total += o.freed
                 if let e = o.error { errors.append("\(t.name): \(e)") }
             }
-            let r = c.scan()
+            let r = c.scan(targets)   // 정리한 대상만 재스캔
             Task { @MainActor in
-                self.entries = Dictionary(uniqueKeysWithValues: r.map { ($0.id, $0) })
+                for e in r { self.entries[e.id] = e }
                 self.lastScan = Date(); self.cleaning = nil
                 if auto { self.lastAutoClean = Date() }
                 let head = "\(auto ? "자동 정리" : "정리") 완료 — \(formatBytes(Double(total))) 확보"

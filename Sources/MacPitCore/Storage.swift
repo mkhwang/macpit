@@ -26,6 +26,15 @@ public struct CleanTarget: Identifiable, Sendable {
     public let dockerType: String?      // `docker system df` 의 Type
 }
 
+/// 정리 대상을 쓰는 중인 프로세스 (pgrep -f 확장 정규식). 자동 정리는 실행 중이면 건너뛴다.
+public let cleanTargetUsers: [String: (label: String, pattern: String)] = [
+    "gradle": ("Gradle", "GradleDaemon|GradleWrapperMain|GradleMain"),
+    "jetbrains": ("JetBrains IDE", "\\.app/Contents/MacOS/(idea|pycharm|webstorm|goland|clion|rider|datagrip|phpstorm|rubymine|rustrover|studio)( |$)"),
+    "xcode": ("Xcode", "Xcode\\.app/Contents/MacOS/Xcode"),
+    "vscode": ("VS Code", "Visual Studio Code\\.app/Contents/MacOS/"),
+    "maven": ("Maven", "org\\.codehaus\\.plexus\\.classworlds"),
+]
+
 public let cleanTargets: [CleanTarget] = [
     // Node
     .init(id: "npm", group: "Node", name: "npm 캐시", detail: "~/.npm (_cacache·_npx·_logs)", risk: .safe,
@@ -70,7 +79,7 @@ public let cleanTargets: [CleanTarget] = [
     // Docker — 크기는 `docker system df` 의 회수 가능량
     .init(id: "docker-build", group: "Docker", name: "빌드 캐시", detail: "docker builder prune -a", risk: .safe,
           paths: [], action: .docker(["builder", "prune", "-a", "-f"]), dockerType: "Build Cache"),
-    .init(id: "docker-images", group: "Docker", name: "미사용 이미지", detail: "docker image prune -a — 컨테이너가 안 쓰는 이미지 전부 (재pull 필요)", risk: .safe,
+    .init(id: "docker-images", group: "Docker", name: "미사용 이미지", detail: "docker image prune -a — 컨테이너가 안 쓰는 이미지 전부 (push 안 한 로컬 빌드 이미지도 삭제)", risk: .caution,
           paths: [], action: .docker(["image", "prune", "-a", "-f"]), dockerType: "Images"),
     .init(id: "docker-containers", group: "Docker", name: "중지된 컨테이너", detail: "docker container prune — 컨테이너 내부 변경분 손실", risk: .caution,
           paths: [], action: .docker(["container", "prune", "-f"]), dockerType: "Containers"),
@@ -95,9 +104,9 @@ public final class StorageCleaner: @unchecked Sendable {
     public let home: String
     private let fm = FileManager.default
 
-    /// MACMON_HOME: 검증용 가짜 home
+    /// MACPIT_HOME: 검증용 가짜 home
     public init(home: String? = nil) {
-        self.home = home ?? ProcessInfo.processInfo.environment["MACMON_HOME"] ?? NSHomeDirectory()
+        self.home = home ?? ProcessInfo.processInfo.environment["MACPIT_HOME"] ?? NSHomeDirectory()
     }
 
     // MARK: 경로 안전
@@ -114,6 +123,8 @@ public final class StorageCleaner: @unchecked Sendable {
         defer { free(real); free(realHome) }
         let r = String(cString: real), h = String(cString: realHome) + "/"
         guard r.hasPrefix(h), r.count > h.count else { return (nil, true) }
+        // 중간 경로가 home 안의 다른 곳을 가리키는 심링크면(예: ~/.m2/repository → ~/work/shared) 거부
+        guard r.hasSuffix("/" + rel) else { return (nil, true) }
         return (url, false)
     }
 
@@ -170,6 +181,12 @@ public final class StorageCleaner: @unchecked Sendable {
 
     // MARK: 정리
 
+    /// 대상을 쓰는 프로세스가 실행 중이면 그 이름
+    public func busyUser(_ t: CleanTarget) -> String? {
+        guard let u = cleanTargetUsers[t.id] else { return nil }
+        return run("/usr/bin/pgrep", ["-f", u.pattern], timeout: 5).status == 0 ? u.label : nil
+    }
+
     public func clean(_ t: CleanTarget) -> CleanOutcome {
         switch t.action {
         case .docker(let args):
@@ -185,7 +202,7 @@ public final class StorageCleaner: @unchecked Sendable {
         case .shell(let cmd):
             return runShellClean(t, cmd)
         case .shellOrRemove(let cmd, let tool):
-            if shell("command -v \(tool)", timeout: 10).status == 0 { return runShellClean(t, cmd) }
+            if shell("command -v \(tool)", timeout: 10, exec: false).status == 0 { return runShellClean(t, cmd) }
             return removeContents(t)
         case .removeContents:
             return removeContents(t)
@@ -260,21 +277,26 @@ public final class StorageCleaner: @unchecked Sendable {
         let pipe = Pipe()
         p.standardOutput = pipe; p.standardError = pipe
         do { try p.run() } catch { return RunResult(status: -1, output: "\(error)") }
-        // 출력 버퍼가 차서 막히지 않게 별도 스레드에서 수집
-        var data = Data()
-        let reader = DispatchQueue(label: "macmon.run.read")
+        // 출력 버퍼가 차서 막히지 않게 별도 스레드에서 수집. data 는 done 신호 이후에만 읽는다
+        final class Box: @unchecked Sendable { var data = Data() }
+        let box = Box()
         let done = DispatchSemaphore(value: 0)
-        reader.async { data = pipe.fileHandleForReading.readDataToEndOfFile(); done.signal() }
+        DispatchQueue.global(qos: .utility).async { box.data = pipe.fileHandleForReading.readDataToEndOfFile(); done.signal() }
         let deadline = Date().addingTimeInterval(timeout)
         while p.isRunning && Date() < deadline { usleep(50_000) }
-        if p.isRunning { p.terminate(); _ = done.wait(timeout: .now() + 2); return RunResult(status: -2, output: "timeout") }
-        _ = done.wait(timeout: .now() + 5)
-        return RunResult(status: p.terminationStatus, output: String(decoding: data, as: UTF8.self))
+        if p.isRunning {
+            p.terminate()
+            if done.wait(timeout: .now() + 2) == .timedOut { kill(p.processIdentifier, SIGKILL) }
+            return RunResult(status: -2, output: "timeout")
+        }
+        guard done.wait(timeout: .now() + 5) == .success else { return RunResult(status: p.terminationStatus, output: "") }
+        return RunResult(status: p.terminationStatus, output: String(decoding: box.data, as: UTF8.self))
     }
 
     /// 로그인 셸 → nvm/volta/brew 등 사용자 PATH 적용
-    func shell(_ cmd: String, timeout: TimeInterval) -> RunResult {
-        run("/bin/zsh", ["-lc", cmd], timeout: timeout)
+    func shell(_ cmd: String, timeout: TimeInterval, exec: Bool = true) -> RunResult {
+        // exec: zsh 가 명령으로 대체돼 타임아웃 시 terminate 가 실제 작업 프로세스에 닿는다 (손자 프로세스 잔존 방지)
+        run("/bin/zsh", ["-lc", exec ? "exec " + cmd : cmd], timeout: timeout)
     }
 }
 

@@ -1,4 +1,4 @@
-# MacMon
+# MacPit
 
 [English](README.md) · **한국어**
 
@@ -53,7 +53,7 @@ Apple Silicon Mac용 메뉴바 시스템 모니터 + **팬 제어** + **개발�
 | JVM | Gradle caches/wrapper/daemon · Maven `~/.m2` ⚠︎ · JetBrains 캐시·로그 |
 | Apple | Xcode DerivedData · iOS DeviceSupport · SwiftPM · CocoaPods |
 | 기타 | pip · uv · Go build · Cargo · Homebrew · VS Code 캐시 · 휴지통 ⚠︎ |
-| Docker | 빌드 캐시 · 미사용 이미지 · 중지 컨테이너 ⚠︎ · 미사용 볼륨 ⚠︎ |
+| Docker | 빌드 캐시 · 미사용 이미지 ⚠︎ · 중지 컨테이너 ⚠︎ · 미사용 볼륨 ⚠︎ |
 
 - **safe**(다시 받으면 되는 캐시)만 기본 체크, ⚠︎ **주의** 항목(데이터 손실 가능)은 기본 해제
 - 패널 "원클릭 정리" → 체크된 항목만, 확인 대화상자 후 실행
@@ -65,20 +65,20 @@ Apple Silicon Mac용 메뉴바 시스템 모니터 + **팬 제어** + **개발�
 - CPU 사용률 · 온도 · 센서 그룹 온도 · 팬 RPM · 메모리 · 네트워크 · 디스크 여유 · 배터리
 - 1시간 / 24시간 / 7일 / 30일 차트 (앱이 꺼져 있던 구간은 선이 끊김)
 
-### ⌨️ CLI (`macmonctl`)
+### ⌨️ CLI (`macpitctl`)
 ```bash
-macmonctl sensors              # 온도·센서 그룹·팬 (권한 불필요)
-macmonctl status               # 데몬 상태
-macmonctl manual 60            # 팬 60% 고정
-macmonctl target 70            # CPU 70°C 유지
-macmonctl curve balanced       # quiet | balanced | performance
-macmonctl system               # macOS 에 반납
-macmonctl storage              # 캐시·Docker 용량
-macmonctl clean safe           # 미리보기 (삭제 안 함)
-macmonctl clean npm gradle --yes
-macmonctl history 24h          # 1h | 24h | 7d | 30d
-macmonctl top                  # CPU·메모리 상위 프로세스
-macmonctl bench                # 센서·통계 수집 비용 측정 (진단용)
+macpitctl sensors              # 온도·센서 그룹·팬 (권한 불필요)
+macpitctl status               # 데몬 상태
+macpitctl manual 60            # 팬 60% 고정
+macpitctl target 70            # CPU 70°C 유지
+macpitctl curve balanced       # quiet | balanced | performance
+macpitctl system               # macOS 에 반납
+macpitctl storage              # 캐시·Docker 용량
+macpitctl clean safe           # 미리보기 (삭제 안 함)
+macpitctl clean npm gradle --yes
+macpitctl history 24h          # 1h | 24h | 7d | 30d
+macpitctl top                  # CPU·메모리 상위 프로세스
+macpitctl bench                # 센서·통계 수집 비용 측정 (진단용)
 ```
 
 ## 설치
@@ -87,15 +87,15 @@ macmonctl bench                # 센서·통계 수집 비용 측정 (진단용)
 
 **Homebrew**
 ```bash
-brew tap mkhwang/macmon https://github.com/mkhwang/macmon
-brew trust mkhwang/macmon     # 비공식 tap 허용 (최신 Homebrew)
-brew install --cask mkhwang/macmon/macmon
+brew tap mkhwang/macpit https://github.com/mkhwang/macpit
+brew trust mkhwang/macpit     # 비공식 tap 허용 (최신 Homebrew)
+brew install --cask mkhwang/macpit/macpit
 ```
 
-**DMG** — [Releases](https://github.com/mkhwang/macmon/releases/latest) 에서 `MacMon-<버전>.dmg` 를 받아 Applications 로 드래그.
+**DMG** — [Releases](https://github.com/mkhwang/macpit/releases/latest) 에서 `MacPit-<버전>.dmg` 를 받아 Applications 로 드래그.
 유료 공증(Developer ID) 없이 배포해서 첫 실행 때 macOS 가 막는다. 한 번만:
 ```bash
-xattr -dr com.apple.quarantine /Applications/MacMon.app
+xattr -dr com.apple.quarantine /Applications/MacPit.app
 ```
 또는 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**.
 
@@ -104,20 +104,22 @@ xattr -dr com.apple.quarantine /Applications/MacMon.app
 
 **소스에서 빌드** (Xcode 또는 Command Line Tools, Swift 5.9+)
 ```bash
-git clone https://github.com/mkhwang/macmon.git
-cd macmon
-./scripts/build.sh          # build/MacMon.app, build/macmond, build/macmonctl
-sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacMon.app + 자동 실행 등록
+git clone https://github.com/mkhwang/macpit.git
+cd macpit
+./scripts/build.sh          # build/MacPit.app, build/macpitd, build/macpitctl
+sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacPit.app + 자동 실행 등록
 ```
 
 | 구성 | 자동 실행 |
 |---|---|
-| `macmond` (팬 제어 데몬) | LaunchDaemon — **부팅 시** 시작, 죽으면 재시작 (`KeepAlive`) |
-| `MacMon.app` (메뉴바) | 로그인 항목 — 설정 메뉴에서 켜고 끔 |
+| `macpitd` (팬 제어 데몬) | LaunchDaemon — **부팅 시** 시작, 죽으면 재시작 (`KeepAlive`) |
+| `MacPit.app` (메뉴바) | 로그인 항목 — 설정 메뉴에서 켜고 끔 |
 
 - 제거: 앱 설정 메뉴 → 팬 제어 데몬 제거, 또는 `sudo ./scripts/uninstall.sh` (팬을 macOS 에 반납한 뒤 제거)
-- 데몬 로그: `/var/log/macmond.log`
+- 데몬 로그: `/var/log/macpitd.log`
 - 앱보다 오래된 데몬이 돌고 있으면 패널에 **데몬 업데이트** 버튼이 뜬다
+
+**MacMon 0.1.x 에서 업그레이드** — 0.2.0 에서 이름이 MacMon → MacPit 으로 바뀌었습니다. MacPit 을 설치해 한 번 실행하면 히스토리·설정·로그인 시 실행이 자동으로 옮겨지고 구 앱은 종료됩니다. 이어서 **팬 제어 설치…** 를 누르면 구 `macmond` 데몬이 교체됩니다. 그 뒤 `MacMon.app` 은 지워도 됩니다. Homebrew 사용자는 `brew uninstall --cask macmon && brew untap mkhwang/macmon` 후 위 방법으로 설치.
 
 > ⚠️ 다른 팬 제어 앱과 **동시에 쓰지 마세요.** 서로 값을 덮어씁니다.
 
@@ -128,14 +130,14 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacMon.app + �
 | `MacBookPro18,1` | M1 Pro | 2 | 수동·곡선·목표온도·반납 확인 |
 
 그 외 기종은 팬 제어가 **실험적**이다 (패널에 "미검증 기종" 표시). 칩마다 SMC 키 배치가 달라질 수 있다.
-[기종 제보](https://github.com/mkhwang/macmon/issues/new?template=device-report.yml) 에 `macmonctl sensors` 출력을 붙여 주면 표에 추가한다.
+[기종 제보](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) 에 `macpitctl sensors` 출력을 붙여 주면 표에 추가한다.
 
 ## 구조
 
 ```
 ┌───────────────┐  JSON over Unix socket   ┌───────────────────────┐
-│ MacMon.app    │ ───────────────────────▶ │ macmond (root)        │
-│ 메뉴바 · 창    │  /var/run/macmond.sock   │ 1초 루프: 정책 → SMC   │
+│ MacPit.app    │ ───────────────────────▶ │ macpitd (root)        │
+│ 메뉴바 · 창    │  /var/run/macpitd.sock   │ 1초 루프: 정책 → SMC   │
 │ (사용자 권한)  │ ◀─────────────────────── │ 쓰기 (팬 모드·목표RPM)  │
 └──────┬────────┘                          └──────────┬────────────┘
        │ SMC 읽기 · 캐시 정리 · SQLite                 │
@@ -146,15 +148,15 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacMon.app + �
 | 경로 | 내용 |
 |---|---|
 | `Sources/CSMC` | AppleSMC IOKit user client (C) — 80바이트 `SMCParamStruct` 읽기/쓰기 |
-| `Sources/MacMonCore` | SMC 래퍼, 센서·팬 감지, 팬 정책(곡선·PI), IPC, 시스템 통계, 스토리지 정리, 히스토리 |
-| `Sources/macmond` | root LaunchDaemon. 유일하게 SMC 에 쓰는 프로세스 |
-| `Sources/MacMonApp` | SwiftUI `MenuBarExtra` 앱 (패널, 스토리지 창, Swift Charts 히스토리 창) |
-| `Sources/macmonctl` | CLI |
-| `Sources/macmon-selftest` | 정책·감지·히스토리 테스트 (CI 에서 실행) |
-| `Casks/macmon.rb` | Homebrew cask (이 저장소가 tap) |
+| `Sources/MacPitCore` | SMC 래퍼, 센서·팬 감지, 팬 정책(곡선·PI), IPC, 시스템 통계, 스토리지 정리, 히스토리 |
+| `Sources/macpitd` | root LaunchDaemon. 유일하게 SMC 에 쓰는 프로세스 |
+| `Sources/MacPitApp` | SwiftUI `MenuBarExtra` 앱 (패널, 스토리지 창, Swift Charts 히스토리 창) |
+| `Sources/macpitctl` | CLI |
+| `Sources/macpit-selftest` | 정책·감지·히스토리 테스트 (CI 에서 실행) |
+| `Casks/macpit.rb` | Homebrew cask (이 저장소가 tap) |
 
 - 소켓은 `0600`, 설치한 사용자 소유 → 다른 사용자는 팬 제어 불가
-- 설정: `/Library/Application Support/MacMon/config.json` · 히스토리: `~/Library/Application Support/MacMon/history.sqlite`
+- 설정: `/Library/Application Support/MacPit/config.json` · 히스토리: `~/Library/Application Support/MacPit/history.sqlite`
 
 ## 팬 제어 원리
 
@@ -195,13 +197,13 @@ Apple Silicon 에서는 SMC 키로 팬을 제어한다.
 
 ```bash
 swift build
-swift run macmon-selftest        # 테스트 (XCTest 없는 CLT 환경에서도 돌도록 실행 타깃으로 작성)
+swift run macpit-selftest        # 테스트 (XCTest 없는 CLT 환경에서도 돌도록 실행 타깃으로 작성)
 
 # root 없이 데몬 흐름 확인 (SMC 쓰기는 권한 오류로 거부됨)
-MACMON_DRYRUN=1 MACMON_SOCKET=/tmp/m.sock MACMON_CONFIG=/tmp/c.json .build/debug/macmond
+MACPIT_DRYRUN=1 MACPIT_SOCKET=/tmp/m.sock MACPIT_CONFIG=/tmp/c.json .build/debug/macpitd
 
-MACMON_FAKE_FANS=0 .build/debug/macmonctl sensors                  # 팬리스 기기 흉내
-MACMON_HOME=/tmp/fakehome .build/debug/macmonctl clean safe --yes  # 가짜 home 에서 정리 테스트
+MACPIT_FAKE_FANS=0 .build/debug/macpitctl sensors                  # 팬리스 기기 흉내
+MACPIT_HOME=/tmp/fakehome .build/debug/macpitctl clean safe --yes  # 가짜 home 에서 정리 테스트
 ```
 
 ## 리소스 사용

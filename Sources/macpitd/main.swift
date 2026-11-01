@@ -1,11 +1,11 @@
 import Foundation
-import MacMonCore
+import MacPitCore
 
-// macmond — root LaunchDaemon. SMC 쓰기(팬 제어) 전담.
+// macpitd — root LaunchDaemon. SMC 쓰기(팬 제어) 전담.
 // 1초 제어 루프 구조:
 //   주기적으로 F{n}Md=1(강제) + F{n}Tg(목표 RPM) 재기록, 안전 온도·센서 실패 시 system 반납, 종료 시 반납.
 
-let version = macmonVersion
+let version = macpitVersion
 setvbuf(stdout, nil, _IOLBF, 0)
 
 func log(_ s: String) {
@@ -13,9 +13,9 @@ func log(_ s: String) {
     print("[\(ts)] \(s)")
 }
 
-let dryRun = ProcessInfo.processInfo.environment["MACMON_DRYRUN"] == "1"
+let dryRun = ProcessInfo.processInfo.environment["MACPIT_DRYRUN"] == "1"
 guard getuid() == 0 || dryRun else {
-    FileHandle.standardError.write("macmond must run as root\n".data(using: .utf8)!)
+    FileHandle.standardError.write("macpitd must run as root\n".data(using: .utf8)!)
     exit(1)
 }
 
@@ -23,7 +23,7 @@ let smc = SMC.shared
 let sensors = Sensors()
 let ctlFans = sensors.controllableFans
 let fanControlAvailable = !ctlFans.isEmpty
-log("macmond \(version) start — fans=\(sensors.fans.map { "F\($0.index)(\(Int($0.min))-\(Int($0.max))\($0.controllable ? "" : ",ro"))" }) cpuKeys=\(sensors.cpuKeys.count) gpuKeys=\(sensors.gpuKeys.count)")
+log("macpitd \(version) start — fans=\(sensors.fans.map { "F\($0.index)(\(Int($0.min))-\(Int($0.max))\($0.controllable ? "" : ",ro"))" }) cpuKeys=\(sensors.cpuKeys.count) gpuKeys=\(sensors.gpuKeys.count)")
 if !fanControlAvailable {
     log(sensors.fans.isEmpty ? "팬 없음(팬리스) — 모니터링 전용으로 동작" : "제어 가능한 팬 없음 — 모니터링 전용으로 동작")
 }
@@ -42,7 +42,7 @@ let state = State()
 nonisolated(unsafe) var signalSources: [DispatchSourceSignal] = []
 
 if let d = FileManager.default.contents(atPath: daemonConfigPath), let c = try? JSONDecoder().decode(FanConfig.self, from: d) {
-    state.config = c
+    state.config = c.sanitized()
     log("config loaded: mode=\(c.mode.rawValue)")
 }
 // 팬리스 기기로 옮겨온 설정 등: 제어 불가하면 system 강제
@@ -125,7 +125,7 @@ for sig in [SIGTERM, SIGINT, SIGHUP] {
 // 이전 크래시로 남은 강제 모드 정리
 state.lock.lock(); releaseFans(); state.lock.unlock()
 
-let tickQueue = DispatchQueue(label: "macmond.tick")
+let tickQueue = DispatchQueue(label: "macpitd.tick")
 let timer = DispatchSource.makeTimerSource(queue: tickQueue)
 timer.schedule(deadline: .now(), repeating: 1.0)
 timer.setEventHandler { tick() }
@@ -136,7 +136,7 @@ func handle(_ fd: Int32) {
     defer { close(fd) }
     var tv = timeval(tv_sec: 2, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-    let line = DaemonClient.readLine(fd: fd, limit: 64 * 1024)
+    let line = DaemonClient.readLine(fd: fd, limit: 64 * 1024, deadline: Date().addingTimeInterval(3))
     var resp = DaemonResponse(ok: true, error: nil, status: nil)
     do {
         let req = try JSONDecoder().decode(DaemonRequest.self, from: line)
@@ -146,14 +146,14 @@ func handle(_ fd: Int32) {
             if let c = req.config, c.mode != .system, !fanControlAvailable {
                 resp.ok = false
                 resp.error = sensors.fans.isEmpty ? "이 Mac 은 팬이 없습니다 (팬리스) — 팬 제어 불가" : "제어 가능한 팬이 없습니다"
-            } else if var c = req.config {
-                c.manualPercent = max(0, min(100, c.manualPercent))
-                c.targetTemp = max(40, min(95, c.targetTemp))
-                c.safetyTemp = max(60, min(105, c.safetyTemp))
-                if c.mode != state.config.mode { state.engine.reset() }
-                state.config = c
-                saveConfig(c)
-                log("config set: mode=\(c.mode.rawValue) manual=\(c.manualPercent) target=\(c.targetTemp)")
+            } else if let raw = req.config {
+                let c = raw.sanitized()
+                if c != state.config {   // 같은 설정 반복 전송 시 디스크 쓰기·로그 생략
+                    if c.mode != state.config.mode { state.engine.reset() }
+                    state.config = c
+                    saveConfig(c)
+                    log("config set: mode=\(c.mode.rawValue) manual=\(c.manualPercent) target=\(c.targetTemp)")
+                }
             } else { resp.ok = false; resp.error = "missing config" }
         case "status": break
         default: resp.ok = false; resp.error = "unknown cmd \(req.cmd)"
@@ -182,17 +182,20 @@ withUnsafeMutableBytes(of: &addr.sun_path) { buf in
 }
 let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(sfd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
 guard bound == 0, listen(sfd, 8) == 0 else { log("socket bind failed errno=\(errno)"); exit(1) }
-// 소켓 접근: root + 설치 시 지정한 사용자(MACMON_OWNER_UID)만
-let ownerUID = ProcessInfo.processInfo.environment["MACMON_OWNER_UID"].flatMap { uid_t($0) } ?? getuid()
+// 소켓 접근: root + 설치 시 지정한 사용자(MACPIT_OWNER_UID)만
+let ownerUID = ProcessInfo.processInfo.environment["MACPIT_OWNER_UID"].flatMap { uid_t($0) } ?? getuid()
 chown(daemonSocketPath, ownerUID, 0)
 chmod(daemonSocketPath, 0o600)
 log("listening \(daemonSocketPath) owner uid=\(ownerUID)")
 
+let connSlots = DispatchSemaphore(value: 4)
 DispatchQueue.global().async {
     while true {
         let cfd = accept(sfd, nil, nil)
         if cfd < 0 { continue }
-        DispatchQueue.global().async { handle(cfd) }
+        // 동시 처리 상한: 느린/악성 클라이언트가 GCD 스레드를 고갈시키지 못하게. 초과분은 즉시 닫음
+        guard connSlots.wait(timeout: .now()) == .success else { close(cfd); continue }
+        DispatchQueue.global().async { handle(cfd); connSlots.signal() }
     }
 }
 

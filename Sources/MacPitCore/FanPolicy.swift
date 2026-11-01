@@ -27,6 +27,22 @@ public struct FanConfig: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// 외부 입력(소켓·디스크)을 안전 범위로 정규화. 비유한 값·과다 점은 기본값/버림.
+    public func sanitized() -> FanConfig {
+        func clamp(_ v: Double, _ lo: Double, _ hi: Double, _ fallback: Double) -> Double {
+            v.isFinite ? Swift.max(lo, Swift.min(hi, v)) : fallback
+        }
+        var c = self
+        c.manualPercent = clamp(manualPercent, 0, 100, 50)
+        c.targetTemp = clamp(targetTemp, 40, 95, 70)
+        c.safetyTemp = clamp(safetyTemp, 60, 105, 95)
+        c.releaseBelowPercent = clamp(releaseBelowPercent, 0, 50, 1)
+        let pts = curve.prefix(16).filter { $0.temp.isFinite && $0.percent.isFinite }
+            .map { CurvePoint(Swift.max(0, Swift.min(130, $0.temp)), Swift.max(0, Swift.min(100, $0.percent))) }
+        c.curve = pts.count >= 2 ? Array(pts) : FanConfig.balancedCurve
+        return c
+    }
+
     public static let quietCurve = [CurvePoint(55, 0), CurvePoint(70, 15), CurvePoint(80, 45), CurvePoint(90, 100)]
     public static let balancedCurve = [CurvePoint(50, 0), CurvePoint(62, 20), CurvePoint(75, 55), CurvePoint(85, 100)]
     public static let performanceCurve = [CurvePoint(40, 10), CurvePoint(55, 35), CurvePoint(68, 70), CurvePoint(78, 100)]
@@ -95,7 +111,7 @@ public struct FanPolicyEngine: Sendable {
 
     /// temp: 제어용 CPU 온도 (max 코어). nil = 센서 실패
     public mutating func decide(config: FanConfig, temp: Double?) -> FanDecision {
-        guard let raw = temp else {
+        guard let raw = temp, raw.isFinite else {   // NaN 센서값이 EMA 에 고착되지 않게
             reset()
             return FanDecision(percent: nil, reason: "sensor-unavailable")
         }
@@ -122,9 +138,11 @@ public struct FanPolicyEngine: Sendable {
         case .target:
             want = controller.step(temp: t, target: config.targetTemp)
         }
-        if let last = lastPercent {
+        if let last = lastPercent, last.isFinite {
             want = max(last - maxStepPerTick, min(last + maxStepPerTick, want))
         }
+        // 비정상 값(NaN/inf)이 상태에 고착되지 않도록: 초기화 후 안전하게 최대 출력
+        guard want.isFinite else { reset(); lastPercent = 100; return FanDecision(percent: 100, reason: "invalid") }
         lastPercent = want
         if want < config.releaseBelowPercent && t < (config.mode == .target ? config.targetTemp - 3 : 200) {
             return FanDecision(percent: nil, reason: "\(config.mode.rawValue)-idle")

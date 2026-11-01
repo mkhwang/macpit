@@ -1,5 +1,5 @@
 import AppKit
-import MacMonCore
+import MacPitCore
 import SwiftUI
 
 @MainActor
@@ -15,7 +15,7 @@ final class Monitor: ObservableObject {
     let model = hardwareModel()
     var modelTested: Bool { fanControlTestedModels.contains(model) }
     /// 데몬이 앱과 다른 버전이면 재설치 권장
-    var daemonOutdated: Bool { daemon.map { $0.version != macmonVersion } ?? false }
+    var daemonOutdated: Bool { daemon.map { $0.version != macpitVersion } ?? false }
     @Published var tempHistory: [Double] = []
     @Published var cpuHistory: [Double] = []
     @Published var config = FanConfig()
@@ -37,7 +37,7 @@ final class Monitor: ObservableObject {
     private let sensors = Sensors()
     private let stats = SystemStats()
     private var timer: Timer?
-    private let io = DispatchQueue(label: "macmon.io")
+    private let io = DispatchQueue(label: "macpit.io")
     let history = HistoryStore()
     private var acc = HistoryAccumulator()
     private var inserts = 0
@@ -179,7 +179,7 @@ func compactRate(_ bps: Double) -> String {
     return "\(Int((bps / 1e3).rounded()))K"
 }
 
-/// 검증용: `MacMon --snapshot out.png` → 패널을 PNG 로 렌더링 후 종료 (스토리지 첫 스캔 완료까지 대기)
+/// 검증용: `MacPit --snapshot out.png` → 패널을 PNG 로 렌더링 후 종료 (스토리지 첫 스캔 완료까지 대기)
 @MainActor func runSnapshot(_ path: String) {
     let m = Monitor()
     m.forcePanelVisible = true
@@ -198,7 +198,7 @@ func compactRate(_ bps: Double) -> String {
     }
 }
 
-/// 검증용: `MacMon --history-snapshot out.png [range]` → 히스토리 창 렌더링
+/// 검증용: `MacPit --history-snapshot out.png [range]` → 히스토리 창 렌더링
 @MainActor func runHistorySnapshot(_ path: String, _ range: String?) {
     let h = HistoryModel.shared
     if let r = range.flatMap(HistoryRange.init(rawValue:)) { h.range = r }
@@ -220,7 +220,7 @@ func compactRate(_ bps: Double) -> String {
 }
 
 @main
-struct MacMonEntry {
+struct MacPitEntry {
     static func main() {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
@@ -232,7 +232,8 @@ struct MacMonEntry {
             MainActor.assumeIsolated { runHistorySnapshot(args[i + 1], i + 2 < args.count ? args[i + 2] : nil) }
             RunLoop.main.run()
         } else {
-            MacMonApp.main()
+            Legacy.migrate()
+            MacPitApp.main()
         }
     }
 }
@@ -252,7 +253,7 @@ struct MenuLabelView: View {
     }
 }
 
-struct MacMonApp: App {
+struct MacPitApp: App {
     // @StateObject 로 두면 Monitor 의 모든 변경마다 Scene(=메뉴바 라벨)이 다시 그려진다 → 관찰하지 않는 상수로 보관
     private let m = Monitor()
     init() { _ = StorageModel.shared }   // 패널을 안 열어도 주기 스캔·자동 정리가 돌도록

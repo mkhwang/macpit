@@ -1,7 +1,7 @@
 import Foundation
 
-public let daemonSocketPath = ProcessInfo.processInfo.environment["MACMON_SOCKET"] ?? "/var/run/macmond.sock"
-public let daemonConfigPath = ProcessInfo.processInfo.environment["MACMON_CONFIG"] ?? "/Library/Application Support/MacMon/config.json"
+public let daemonSocketPath = ProcessInfo.processInfo.environment["MACPIT_SOCKET"] ?? "/var/run/macpitd.sock"
+public let daemonConfigPath = ProcessInfo.processInfo.environment["MACPIT_CONFIG"] ?? "/Library/Application Support/MacPit/config.json"
 
 public struct DaemonRequest: Codable, Sendable {
     public var cmd: String               // "status" | "setConfig"
@@ -62,10 +62,12 @@ public enum DaemonClient {
         return try JSONDecoder().decode(DaemonResponse.self, from: line)
     }
 
-    public static func readLine(fd: Int32, limit: Int = 1 << 20) -> Data {
+    /// deadline: 연결 전체 읽기 시간 상한 (SO_RCVTIMEO 는 read 1회 단위라 느린 송신자를 못 끊음)
+    public static func readLine(fd: Int32, limit: Int = 1 << 20, deadline: Date? = nil) -> Data {
         var out = Data()
         var buf = [UInt8](repeating: 0, count: 4096)
         while out.count < limit {
+            if let deadline, Date() >= deadline { return Data() }
             let n = read(fd, &buf, buf.count)
             if n <= 0 { break }
             out.append(contentsOf: buf[0..<n])

@@ -1,7 +1,7 @@
 import Foundation
 
 /// 앱·데몬·CLI 공통 버전. 앱이 데몬 버전과 비교해 업데이트 필요 여부를 판단한다.
-public let macmonVersion = "0.1.0"
+public let macpitVersion = "0.2.0"
 
 /// 팬 제어를 실측 검증한 기종 (hw.model). 그 외 기종은 UI 에 "미검증" 표시.
 public let fanControlTestedModels: Set<String> = ["MacBookPro18,1"]

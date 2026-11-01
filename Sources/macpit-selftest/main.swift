@@ -1,5 +1,5 @@
 import Foundation
-import MacMonCore
+import MacPitCore
 
 nonisolated(unsafe) var failures = 0
 nonisolated(unsafe) var current = ""
@@ -31,6 +31,10 @@ struct FanPolicyTests {
         ("testSensorGroups", testSensorGroups),
         ("testGroupHistory", testGroupHistory),
         ("testParsePS", testParsePS),
+        ("testMigrateLegacyHistory", testMigrateLegacyHistory),
+        ("testSanitizeConfig", testSanitizeConfig),
+        ("testNonFiniteCurveRecovers", testNonFiniteCurveRecovers),
+        ("testCleanerRejectsInnerSymlink", testCleanerRejectsInnerSymlink),
     ]
 
     func testParsePS() {
@@ -58,7 +62,7 @@ struct FanPolicyTests {
         _ = a.add(HistoryPoint(ts: 4), groups: ["ssd": 40, "gpu": 50])
         _ = a.add(HistoryPoint(ts: 10), groups: [:])
         expect(a.flushedGroups == ["ssd": 35, "gpu": 50], "\(a.flushedGroups)")
-        let path = NSTemporaryDirectory() + "macmon-gtest-\(getpid()).sqlite"
+        let path = NSTemporaryDirectory() + "macpit-gtest-\(getpid()).sqlite"
         defer { for s in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + s) } }
         guard let h = HistoryStore(path: path) else { expect(false, "open"); return }
         h.insertGroups(ts: 100, ["ssd": 30, "gpu": 50]); h.insertGroups(ts: 110, ["ssd": 40])
@@ -74,7 +78,7 @@ struct FanPolicyTests {
         expect(r?.ts == 100 && r?.cpu == 20 && r?.fan == 2000 && r?.temp == nil, "\(String(describing: r))")
     }
     func testHistoryStoreQueryPrune() {
-        let path = NSTemporaryDirectory() + "macmon-test-\(getpid()).sqlite"
+        let path = NSTemporaryDirectory() + "macpit-test-\(getpid()).sqlite"
         defer { for s in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + s) } }
         guard let h = HistoryStore(path: path) else { expect(false, "open"); return }
         let now: Int64 = 1_800_000_000
@@ -85,6 +89,59 @@ struct FanPolicyTests {
         expect(pts.count == 10 && pts.first?.cpu == 2.5 && pts.allSatisfy { $0.temp == 50 }, "\(pts.count) \(String(describing: pts.first))")
         h.prune(now: now)
         expect(h.count() == 60)
+    }
+    func testSanitizeConfig() {
+        var c = FanConfig()
+        c.manualPercent = .nan; c.targetTemp = 1e9; c.safetyTemp = -.infinity; c.releaseBelowPercent = 999
+        c.curve = [CurvePoint(-1e308, -1e308), CurvePoint(1e308, 1e308)]
+        let s = c.sanitized()
+        expect(s.manualPercent == 50 && s.targetTemp == 95 && s.safetyTemp == 95 && s.releaseBelowPercent == 50, "\(s)")
+        expect(s.curve.allSatisfy { (0...130).contains($0.temp) && (0...100).contains($0.percent) }, "curve \(s.curve)")
+        c.curve = Array(repeating: CurvePoint(50, 50), count: 1000)
+        expect(c.sanitized().curve.count == 16)
+        c.curve = [CurvePoint(.nan, 1)]
+        expect(c.sanitized().curve == FanConfig.balancedCurve)
+    }
+    func testNonFiniteCurveRecovers() {
+        // 검증 우회로 NaN 곡선이 들어와도 결정값은 유한하고, 정상 곡선으로 바꾸면 같은 모드에서 회복
+        var e = FanPolicyEngine()
+        var c = FanConfig(); c.mode = .curve
+        c.curve = [CurvePoint(-1e308, -1e308), CurvePoint(1e308, 1e308)]
+        for _ in 0..<3 { let d = e.decide(config: c, temp: 60); expect(d.percent.map { $0.isFinite } ?? true, "\(d)") }
+        c.curve = FanConfig.balancedCurve
+        var last: FanDecision?
+        for _ in 0..<30 { last = e.decide(config: c, temp: 60) }
+        expect(last?.reason == "curve" && (last?.percent.map { $0 < 30 } ?? false), "\(String(describing: last))")
+        expect(e.decide(config: c, temp: .nan).percent == nil)
+    }
+    func testCleanerRejectsInnerSymlink() {
+        let fm = FileManager.default
+        let home = NSTemporaryDirectory() + "macpit-home-\(getpid())"
+        defer { try? fm.removeItem(atPath: home) }
+        try? fm.createDirectory(atPath: home + "/work/shared", withIntermediateDirectories: true)
+        try? fm.createDirectory(atPath: home + "/.m2", withIntermediateDirectories: true)
+        fm.createFile(atPath: home + "/work/shared/keep.jar", contents: Data("x".utf8))
+        try? fm.createSymbolicLink(atPath: home + "/.m2/repository", withDestinationPath: home + "/work/shared")
+        let c = StorageCleaner(home: home)
+        let o = c.clean(cleanTargets.first { $0.id == "maven" }!)
+        expect(fm.fileExists(atPath: home + "/work/shared/keep.jar"), "symlink target must survive")
+        expect(o.error?.contains("거부") == true, "\(String(describing: o.error))")
+    }
+    func testMigrateLegacyHistory() {
+        let fm = FileManager.default
+        let root = NSTemporaryDirectory() + "macpit-mig-\(getpid())"
+        defer { try? fm.removeItem(atPath: root) }
+        let oldDir = root + "/MacMon", newPath = root + "/MacPit/history.sqlite"
+        try? fm.createDirectory(atPath: oldDir, withIntermediateDirectories: true)
+        do { let h = HistoryStore(path: oldDir + "/history.sqlite"); h?.insert(HistoryPoint(ts: 100, cpu: 7)) }
+        expect(migrateLegacyHistory(from: oldDir, to: newPath), "first migrate")
+        expect(!fm.fileExists(atPath: oldDir + "/history.sqlite"), "old removed")
+        expect(HistoryStore(path: newPath)?.count() == 1, "data kept")
+        // 새 DB 가 있으면 덮어쓰지 않음
+        try? fm.createDirectory(atPath: oldDir, withIntermediateDirectories: true)
+        fm.createFile(atPath: oldDir + "/history.sqlite", contents: Data("x".utf8))
+        expect(!migrateLegacyHistory(from: oldDir, to: newPath), "no overwrite")
+        expect(HistoryStore(path: newPath)?.count() == 1, "new intact")
     }
     func testParseDockerSize() {
         expect(parseDockerSize("13.58GB") == 13_580_000_000)

@@ -1,15 +1,15 @@
-# MacMon
+# MacPit
 
 **English** · [한국어](README.ko.md)
 
-[![CI](https://github.com/mkhwang/macmon/actions/workflows/ci.yml/badge.svg)](https://github.com/mkhwang/macmon/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/mkhwang/macmon)](https://github.com/mkhwang/macmon/releases/latest)
+[![CI](https://github.com/mkhwang/macpit/actions/workflows/ci.yml/badge.svg)](https://github.com/mkhwang/macpit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mkhwang/macpit)](https://github.com/mkhwang/macpit/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A free, open-source menu bar app for Apple Silicon Macs that does three things in one place:
 
 - **Temperatures** — CPU/GPU plus sensor groups (memory, SSD, battery, airflow, palm rest …), with 30-day history.
-- **Fan control** — manual %, temperature curves, or **hold a target temperature** with a PI controller. Fans go back to macOS whenever MacMon is not sure.
+- **Fan control** — manual %, temperature curves, or **hold a target temperature** with a PI controller. Fans go back to macOS whenever MacPit is not sure.
 - **Developer cache cleanup** — see and reclaim space from npm, pnpm, Gradle, Maven, JetBrains, Xcode DerivedData, Docker and more.
 
 <p>
@@ -25,15 +25,15 @@ Requires an Apple Silicon Mac and macOS 14 or later.
 
 **Homebrew**
 ```bash
-brew tap mkhwang/macmon https://github.com/mkhwang/macmon
-brew trust mkhwang/macmon     # Homebrew 5+: allow casks from this tap
-brew install --cask mkhwang/macmon/macmon
+brew tap mkhwang/macpit https://github.com/mkhwang/macpit
+brew trust mkhwang/macpit     # Homebrew 5+: allow casks from this tap
+brew install --cask mkhwang/macpit/macpit
 ```
 
-**DMG** — download `MacMon-<version>.dmg` from [Releases](https://github.com/mkhwang/macmon/releases/latest) and drag MacMon to Applications.
-MacMon is free and is not notarized by Apple, so macOS blocks the first launch. Run once:
+**DMG** — download `MacPit-<version>.dmg` from [Releases](https://github.com/mkhwang/macpit/releases/latest) and drag MacPit to Applications.
+MacPit is free and is not notarized by Apple, so macOS blocks the first launch. Run once:
 ```bash
-xattr -dr com.apple.quarantine /Applications/MacMon.app
+xattr -dr com.apple.quarantine /Applications/MacPit.app
 ```
 or open **System Settings → Privacy & Security → Open Anyway**.
 
@@ -42,16 +42,18 @@ The **설정** (*Settings*) menu has *Open at login* and *Remove fan helper*.
 
 **Build from source** (Xcode or Command Line Tools, Swift 5.9+)
 ```bash
-git clone https://github.com/mkhwang/macmon.git && cd macmon
-./scripts/build.sh          # build/MacMon.app, build/macmond, build/macmonctl
-sudo ./scripts/install.sh   # fan helper + ~/Applications/MacMon.app + open at login
+git clone https://github.com/mkhwang/macpit.git && cd macpit
+./scripts/build.sh          # build/MacPit.app, build/macpitd, build/macpitctl
+sudo ./scripts/install.sh   # fan helper + ~/Applications/MacPit.app + open at login
 ```
 
-> ⚠️ Do not run MacMon together with another fan control app. They overwrite each other's settings.
+**Upgrading from MacMon 0.1.x** — the project was renamed from MacMon to MacPit in 0.2.0. Install MacPit, launch it once (history, settings and *Open at login* move over automatically, and the old app is quit), then click **팬 제어 설치…** to replace the old `macmond` helper. Delete `MacMon.app` afterwards. Homebrew users: `brew uninstall --cask macmon && brew untap mkhwang/macmon`, then install as above.
+
+> ⚠️ Do not run MacPit together with another fan control app. They overwrite each other's settings.
 
 ## How it compares
 
-| | MacMon | [Stats](https://github.com/exelban/stats) | Macs Fan Control | TG Pro |
+| | MacPit | [Stats](https://github.com/exelban/stats) | Macs Fan Control | TG Pro |
 |---|---|---|---|---|
 | Open source | ✅ MIT | ✅ MIT | — | — |
 | Price | Free | Free | Free / Pro | Paid |
@@ -59,7 +61,7 @@ sudo ./scripts/install.sh   # fan helper + ~/Applications/MacMon.app + open at l
 | Fan control on Apple Silicon | ✅ manual · curve · target temp | legacy, marked unmaintained | ✅ | ✅ |
 | Developer cache & Docker cleanup | ✅ | — | — | — |
 
-Stats is the better general-purpose system monitor. MacMon is for developers who want fan control and cache cleanup without paying for two apps.
+Stats is the better general-purpose system monitor. MacPit is for developers who want fan control and cache cleanup without paying for two apps.
 
 ## Features
 
@@ -91,7 +93,7 @@ Works with fanless (MacBook Air, monitoring only), single-fan (Mac mini) and dua
 | JVM | Gradle caches/wrapper/daemon · Maven `~/.m2` ⚠︎ · JetBrains caches and logs |
 | Apple | Xcode DerivedData · iOS DeviceSupport · SwiftPM · CocoaPods |
 | Other | pip · uv · Go build · Cargo · Homebrew · VS Code caches · Trash ⚠︎ |
-| Docker | build cache · unused images · stopped containers ⚠︎ · unused volumes ⚠︎ |
+| Docker | build cache · unused images ⚠︎ · stopped containers ⚠︎ · unused volumes ⚠︎ |
 
 - Only **safe** items (re-downloadable caches) are checked by default. ⚠︎ items can lose data and are never pre-selected.
 - One-click cleanup asks for confirmation. Optional weekly or monthly auto-cleanup runs safe items only.
@@ -104,17 +106,17 @@ Works with fanless (MacBook Air, monitoring only), single-fan (Mac mini) and dua
 
 ### CLI
 ```bash
-macmonctl sensors              # temperatures, sensor groups, fans (no root needed)
-macmonctl status               # helper status
-macmonctl manual 60            # fans at 60%
-macmonctl target 70            # hold CPU at 70°C
-macmonctl curve balanced       # quiet | balanced | performance
-macmonctl system               # give fans back to macOS
-macmonctl storage              # cache and Docker usage
-macmonctl clean safe           # preview only, deletes nothing
-macmonctl clean npm gradle --yes
-macmonctl history 24h          # 1h | 24h | 7d | 30d
-macmonctl top                  # top processes
+macpitctl sensors              # temperatures, sensor groups, fans (no root needed)
+macpitctl status               # helper status
+macpitctl manual 60            # fans at 60%
+macpitctl target 70            # hold CPU at 70°C
+macpitctl curve balanced       # quiet | balanced | performance
+macpitctl system               # give fans back to macOS
+macpitctl storage              # cache and Docker usage
+macpitctl clean safe           # preview only, deletes nothing
+macpitctl clean npm gradle --yes
+macpitctl history 24h          # 1h | 24h | 7d | 30d
+macpitctl top                  # top processes
 ```
 
 ## Tested Macs
@@ -124,7 +126,7 @@ macmonctl top                  # top processes
 | `MacBookPro18,1` | M1 Pro | 2 | manual, curve, target temp and hand-back verified |
 
 On other models fan control is **experimental** and the panel says so. SMC key layouts can change between chips.
-Please [send a device report](https://github.com/mkhwang/macmon/issues/new?template=device-report.yml) with the output of `macmonctl sensors`. Each report adds a row here.
+Please [send a device report](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) with the output of `macpitctl sensors`. Each report adds a row here.
 
 ## How fan control works
 
@@ -147,8 +149,8 @@ Measured on a MacBook Pro M1 Pro (`MacBookPro18,1`): manual 60% took the fans fr
 
 ```
 ┌───────────────┐  JSON over Unix socket   ┌───────────────────────┐
-│ MacMon.app    │ ───────────────────────▶ │ macmond (root)        │
-│ menu bar, UI  │  /var/run/macmond.sock   │ 1 s loop: policy →    │
+│ MacPit.app    │ ───────────────────────▶ │ macpitd (root)        │
+│ menu bar, UI  │  /var/run/macpitd.sock   │ 1 s loop: policy →    │
 │ (your user)   │ ◀─────────────────────── │ SMC fan writes        │
 └──────┬────────┘                          └──────────┬────────────┘
        │ SMC reads · cleanup · SQLite                 │
@@ -159,12 +161,12 @@ Measured on a MacBook Pro M1 Pro (`MacBookPro18,1`): manual 60% took the fans fr
 | Path | Contents |
 |---|---|
 | `Sources/CSMC` | AppleSMC IOKit user client in C (80-byte `SMCParamStruct`) |
-| `Sources/MacMonCore` | SMC wrapper, sensor and fan detection, fan policy (curve, PI), IPC, stats, cleanup, history |
-| `Sources/macmond` | root LaunchDaemon, the only process that writes to the SMC |
-| `Sources/MacMonApp` | SwiftUI `MenuBarExtra` app |
-| `Sources/macmonctl` | CLI |
-| `Sources/macmon-selftest` | policy, detection and history tests (run in CI) |
-| `Casks/macmon.rb` | Homebrew cask (this repo is the tap) |
+| `Sources/MacPitCore` | SMC wrapper, sensor and fan detection, fan policy (curve, PI), IPC, stats, cleanup, history |
+| `Sources/macpitd` | root LaunchDaemon, the only process that writes to the SMC |
+| `Sources/MacPitApp` | SwiftUI `MenuBarExtra` app |
+| `Sources/macpitctl` | CLI |
+| `Sources/macpit-selftest` | policy, detection and history tests (run in CI) |
+| `Casks/macpit.rb` | Homebrew cask (this repo is the tap) |
 
 See [SECURITY.md](SECURITY.md) for what the root helper can and cannot do.
 
@@ -176,16 +178,16 @@ About 1–2% CPU with the panel closed and a memory footprint around 30 MB (M1 P
 
 ```bash
 swift build
-swift run macmon-selftest        # tests (an executable target, so it runs without XCTest)
-./scripts/package.sh             # build/dist/MacMon-<ver>.dmg, .zip, SHA256SUMS
+swift run macpit-selftest        # tests (an executable target, so it runs without XCTest)
+./scripts/package.sh             # build/dist/MacPit-<ver>.dmg, .zip, SHA256SUMS
 
 # helper flow without root (SMC writes are rejected)
-MACMON_DRYRUN=1 MACMON_SOCKET=/tmp/m.sock MACMON_CONFIG=/tmp/c.json .build/debug/macmond
-MACMON_FAKE_FANS=0 .build/debug/macmonctl sensors                  # pretend to be fanless
-MACMON_HOME=/tmp/fakehome .build/debug/macmonctl clean safe --yes  # cleanup in a fake home
+MACPIT_DRYRUN=1 MACPIT_SOCKET=/tmp/m.sock MACPIT_CONFIG=/tmp/c.json .build/debug/macpitd
+MACPIT_FAKE_FANS=0 .build/debug/macpitctl sensors                  # pretend to be fanless
+MACPIT_HOME=/tmp/fakehome .build/debug/macpitctl clean safe --yes  # cleanup in a fake home
 ```
 
-Releases: bump `macmonVersion` in `Sources/MacMonCore/Version.swift`, push a `v<version>` tag. GitHub Actions builds the DMG, creates the release and updates the cask.
+Releases: bump `macpitVersion` in `Sources/MacPitCore/Version.swift`, push a `v<version>` tag. GitHub Actions builds the DMG, creates the release and updates the cask.
 
 ## Limitations
 
@@ -195,7 +197,7 @@ Releases: bump `macmonVersion` in `Sources/MacMonCore/Version.swift`, push a `v<
 
 ## Disclaimer
 
-MacMon writes to the SMC. It has safeguards, but pinning fans low raises temperatures, and you use it at your own risk. This is a personal project, not affiliated with Apple.
+MacPit writes to the SMC. It has safeguards, but pinning fans low raises temperatures, and you use it at your own risk. This is a personal project, not affiliated with Apple.
 
 ## License
 

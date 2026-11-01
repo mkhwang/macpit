@@ -15,9 +15,9 @@ jobs:
       - name: Version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - name: Check version matches source
-        run: grep -q "macmonVersion = \"$VERSION\"" Sources/MacMonCore/Version.swift
+        run: grep -q "macpitVersion = \"$VERSION\"" Sources/MacPitCore/Version.swift
       - name: Selftest
-        run: swift run macmon-selftest
+        run: swift run macpit-selftest
       - name: Package
         run: ./scripts/package.sh
       - name: Release
@@ -25,14 +25,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" build/dist/* \
-            --title "MacMon $VERSION" --generate-notes \
+            --title "MacPit $VERSION" --generate-notes \
             --notes-file .github/release-notes.md
       - name: Update cask
         run: |
-          SHA=$(shasum -a 256 "build/dist/MacMon-$VERSION.dmg" | cut -d' ' -f1)
+          SHA=$(shasum -a 256 "build/dist/MacPit-$VERSION.dmg" | cut -d' ' -f1)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main && git checkout main
-          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/macmon.rb
-          git add Casks/macmon.rb
+          sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/macpit.rb
+          git add Casks/macpit.rb
           git diff --cached --quiet || { git commit -m "cask: $VERSION"; git push origin main; }

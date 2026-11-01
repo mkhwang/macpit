@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: macos-15
@@ -12,6 +14,6 @@ jobs:
       - name: Build
         run: swift build
       - name: Selftest
-        run: swift run macmon-selftest
+        run: swift run macpit-selftest
       - name: Bundle
         run: ./scripts/build.sh

@@ -1,4 +1,4 @@
-import MacMonCore
+import MacPitCore
 import SwiftUI
 
 func tempColor(_ t: Double?) -> Color {
@@ -199,14 +199,15 @@ struct PanelView: View {
     @ViewBuilder var setupRow: some View {
         if m.daemon == nil || m.daemonOutdated {
             HStack {
-                Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macmonVersion))…") {
+                Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macpitVersion))…") {
                     m.setupDaemon(.install)
                 }
                 .disabled(m.setupBusy || !DaemonSetup.available)
                 if m.setupBusy { ProgressView().controlSize(.small) }
             }
             .font(.caption)
-            Text(DaemonSetup.available ? "관리자 암호가 필요합니다. 모니터링·정리는 설치 없이 동작합니다."
+            Text(Legacy.daemonInstalled ? "구버전(MacMon) 데몬 감지 — 설치하면 자동으로 교체됩니다."
+                 : DaemonSetup.available ? "관리자 암호가 필요합니다. 모니터링·정리는 설치 없이 동작합니다."
                                        : "이 실행 파일에는 데몬이 동봉되어 있지 않습니다. scripts/install.sh 를 쓰세요.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
@@ -272,7 +273,7 @@ struct PanelView: View {
 
     var footer: some View {
         HStack {
-            Text(m.daemon.map { "macmond \($0.version)" } ?? "macmond 없음").font(.caption2).foregroundStyle(.secondary)
+            Text(m.daemon.map { "macpitd \($0.version)" } ?? "macpitd 없음").font(.caption2).foregroundStyle(.secondary)
             Spacer()
             Menu("설정") {
                 Text("메뉴바 표시")

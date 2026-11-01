@@ -32,7 +32,7 @@ body:
   - type: textarea
     id: sensors
     attributes:
-      label: "`macmonctl sensors` output"
+      label: "`macpitctl sensors` output"
       render: text
     validations:
       required: true
@@ -40,4 +40,4 @@ body:
     id: notes
     attributes:
       label: Notes
-      description: Anything odd — wrong temperatures, missing groups, fans not spinning down, log lines from /var/log/macmond.log
+      description: Anything odd — wrong temperatures, missing groups, fans not spinning down, log lines from /var/log/macpitd.log

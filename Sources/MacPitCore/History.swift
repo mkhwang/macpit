@@ -30,8 +30,23 @@ public enum HistoryRange: String, CaseIterable, Sendable {
     public var bucket: Int64 { max(10, seconds / 360) }
 }
 
-public let historyDBPath: String = ProcessInfo.processInfo.environment["MACMON_HISTORY"]
-    ?? (NSHomeDirectory() + "/Library/Application Support/MacMon/history.sqlite")
+public let historyDBPath: String = ProcessInfo.processInfo.environment["MACPIT_HISTORY"]
+    ?? (NSHomeDirectory() + "/Library/Application Support/MacPit/history.sqlite")
+
+/// 0.1.x(MacMon) 히스토리 DB 를 새 경로로 이동. 새 DB 가 이미 있으면 아무것도 안 함. 이동했으면 true
+@discardableResult
+public func migrateLegacyHistory(from oldDir: String, to newPath: String) -> Bool {
+    let fm = FileManager.default
+    let old = oldDir + "/history.sqlite"
+    guard fm.fileExists(atPath: old), !fm.fileExists(atPath: newPath) else { return false }
+    try? fm.createDirectory(atPath: (newPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    guard (try? fm.moveItem(atPath: old, toPath: newPath)) != nil else { return false }
+    for suffix in ["-wal", "-shm"] where fm.fileExists(atPath: old + suffix) {
+        try? fm.moveItem(atPath: old + suffix, toPath: newPath + suffix)
+    }
+    if (try? fm.contentsOfDirectory(atPath: oldDir))?.isEmpty == true { try? fm.removeItem(atPath: oldDir) }
+    return true
+}
 
 public final class HistoryStore: @unchecked Sendable {
     public static let retention: Int64 = 30 * 86400

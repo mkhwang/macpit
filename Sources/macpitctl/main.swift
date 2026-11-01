@@ -1,14 +1,14 @@
 import Foundation
-import MacMonCore
+import MacPitCore
 
-// macmonctl — CLI. 센서 읽기(권한 불필요) + 데몬 제어.
-//   macmonctl sensors            현재 온도·팬
-//   macmonctl keys [prefix]      SMC 키 덤프
-//   macmonctl status             데몬 상태
-//   macmonctl system             팬을 macOS 에 반납
-//   macmonctl manual <0-100>     고정 %
-//   macmonctl target <°C>        목표 온도 유지
-//   macmonctl curve quiet|balanced|performance
+// macpitctl — CLI. 센서 읽기(권한 불필요) + 데몬 제어.
+//   macpitctl sensors            현재 온도·팬
+//   macpitctl keys [prefix]      SMC 키 덤프
+//   macpitctl status             데몬 상태
+//   macpitctl system             팬을 macOS 에 반납
+//   macpitctl manual <0-100>     고정 %
+//   macpitctl target <°C>        목표 온도 유지
+//   macpitctl curve quiet|balanced|performance
 
 func f(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "-" }
 
@@ -105,7 +105,7 @@ case "top":
     print("CPU 상위"); for p in t.byCPU { print(String(format: "  %6.1f%%  %6d  %@", p.cpu, p.pid, p.name)) }
     print("메모리 상위"); for p in t.byMem { print("  \(formatBytes(Double(p.mem)).padding(toLength: 8, withPad: " ", startingAt: 0))  \(p.pid)  \(p.name)") }
 case "history":
-    // macmonctl history [1h|24h|7d|30d]
+    // macpitctl history [1h|24h|7d|30d]
     let r = HistoryRange(rawValue: args.count > 1 ? args[1] : "1h") ?? .hour
     guard let h = HistoryStore() else { print("history db 열기 실패: \(historyDBPath)"); exit(1) }
     let pts = h.query(r)
@@ -118,11 +118,11 @@ case "history":
         print(String(format: "temp 최고 %.1f° 평균 %.1f°", mx, avg.reduce(0, +) / Double(avg.count)))
     }
 case "clean":
-    // macmonctl clean <id...>|safe [--yes]   — --yes 없으면 미리보기
+    // macpitctl clean <id...>|safe [--yes]   — --yes 없으면 미리보기
     let yes = args.contains("--yes")
     let ids = args.dropFirst().filter { $0 != "--yes" }
     let chosen = ids.contains("safe") ? cleanTargets.filter { $0.risk == .safe } : cleanTargets.filter { ids.contains($0.id) }
-    guard !chosen.isEmpty else { print("usage: macmonctl clean <id...>|safe [--yes]  (id 는 macmonctl storage 참고)"); exit(1) }
+    guard !chosen.isEmpty else { print("usage: macpitctl clean <id...>|safe [--yes]  (id 는 macpitctl storage 참고)"); exit(1) }
     let c = StorageCleaner()
     let res = Dictionary(uniqueKeysWithValues: c.scan(chosen).map { ($0.id, $0) })
     for t in chosen { print("  \(t.id): \(formatBytes(Double(res[t.id]?.bytes ?? 0)))\(t.risk == .caution ? "  ⚠︎ \(t.detail)" : "")") }
@@ -134,5 +134,5 @@ case "clean":
     }
     print("총 \(formatBytes(Double(total))) 확보")
 default:
-    print("usage: macmonctl sensors|keys [prefix]|status|system|manual <%>|target <°C>|curve <preset>|top|history [1h|24h|7d|30d]|storage|clean <id...>|safe [--yes]")
+    print("usage: macpitctl sensors|keys [prefix]|status|system|manual <%>|target <°C>|curve <preset>|top|history [1h|24h|7d|30d]|storage|clean <id...>|safe [--yes]")
 }

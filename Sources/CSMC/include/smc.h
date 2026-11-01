@@ -1,5 +1,5 @@
-#ifndef MACMON_SMC_H
-#define MACMON_SMC_H
+#ifndef MACPIT_SMC_H
+#define MACPIT_SMC_H
 
 #include <stdint.h>
 #include <stdbool.h>

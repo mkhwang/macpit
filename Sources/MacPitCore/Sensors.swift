@@ -133,8 +133,8 @@ public final class Sensors {
         gpuKeys = keys.filter { $0.hasPrefix("Tg") && valid($0) }
         groups = detectSensorGroups(keys: keys, read: { SMC.shared.double($0) })
         let detected = detectFans(read: { SMC.shared.double($0) })
-        // 검증용: MACMON_FAKE_FANS=N → 감지된 팬 중 앞 N개만 (0 = 팬리스 흉내)
-        if let n = ProcessInfo.processInfo.environment["MACMON_FAKE_FANS"].flatMap(Int.init) {
+        // 검증용: MACPIT_FAKE_FANS=N → 감지된 팬 중 앞 N개만 (0 = 팬리스 흉내)
+        if let n = ProcessInfo.processInfo.environment["MACPIT_FAKE_FANS"].flatMap(Int.init) {
             fans = Array(detected.prefix(max(0, n)))
         } else {
             fans = detected

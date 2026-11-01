@@ -15,12 +15,12 @@ body:
   - type: input
     id: env
     attributes:
-      label: MacMon version, model identifier (`sysctl -n hw.model`), macOS version
+      label: MacPit version, model identifier (`sysctl -n hw.model`), macOS version
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: "`macmonctl status`, last lines of /var/log/macmond.log"
+      description: "`macpitctl status`, last lines of /var/log/macpitd.log"
       render: text
