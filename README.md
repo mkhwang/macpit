@@ -38,7 +38,7 @@ xattr -dr com.apple.quarantine /Applications/MacPit.app
 or open **System Settings → Privacy & Security → Open Anyway**.
 
 **Turn on fan control** — open the panel and click **팬 제어 설치…** (*Install fan control*). macOS asks for your admin password once. Monitoring, history and cleanup work without it.
-The **설정** (*Settings*) menu has *Open at login* and *Remove fan helper*.
+The **설정** (*Settings*) window lets you pick and drag-reorder menu bar items, and has *Open at login* and *Remove fan helper*. Click the **시스템** (*System*) card to open Activity Monitor.
 
 **Build from source** (Xcode or Command Line Tools, Swift 5.9+)
 ```bash

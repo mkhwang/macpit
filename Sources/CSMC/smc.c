@@ -64,15 +64,49 @@ int smc_key_info(uint32_t key, smc_val_t *v) {
     return 0;
 }
 
+// 키 정보(size/type)는 부팅 중 바뀌지 않으므로 캐시 → 읽기 1회당 IOKit 호출 2번 → 1번.
+// 호출자(Swift SMC)가 lock 을 잡고 부르므로 별도 동기화 없음.
+#define KI_CACHE 256
+static struct { uint32_t key, size, type; uint8_t attr; } g_ki[KI_CACHE];
+
+static int key_info_cached(uint32_t key, smc_val_t *v) {
+    if (key == 0) return smc_key_info(key, v);
+    unsigned h = (key * 2654435761u) % KI_CACHE;
+    for (unsigned n = 0; n < KI_CACHE; n++, h = (h + 1) % KI_CACHE) {
+        if (g_ki[h].key == key && g_ki[h].size == 0) {   // 무효화된 항목 → 다시 조회
+            int r = smc_key_info(key, v);
+            if (r == 0 && v->size <= 32) { g_ki[h].size = v->size; g_ki[h].type = v->type; g_ki[h].attr = v->attr; }
+            return r;
+        }
+        if (g_ki[h].key == key) {
+            memset(v, 0, sizeof(*v));
+            v->key = key; v->size = g_ki[h].size; v->type = g_ki[h].type; v->attr = g_ki[h].attr;
+            return 0;
+        }
+        if (g_ki[h].key == 0) {
+            int r = smc_key_info(key, v);
+            if (r == 0 && v->size <= 32) { g_ki[h].key = key; g_ki[h].size = v->size; g_ki[h].type = v->type; g_ki[h].attr = v->attr; }
+            return r;
+        }
+    }
+    return smc_key_info(key, v);   // 캐시 가득 참
+}
+
+static void key_info_forget(uint32_t key) {
+    unsigned h = (key * 2654435761u) % KI_CACHE;
+    for (unsigned n = 0; n < KI_CACHE && g_ki[h].key; n++, h = (h + 1) % KI_CACHE)
+        if (g_ki[h].key == key) { g_ki[h].size = 0; break; }   // 키는 남겨 탐색 체인 유지
+}
+
 int smc_read(uint32_t key, smc_val_t *v) {
-    int r = smc_key_info(key, v);
+    int r = key_info_cached(key, v);
     if (r) return r;
     SMCParamStruct in = {0}, out = {0};
     in.key = key;
     in.keyInfo.dataSize = v->size;
     in.data8 = SMC_CMD_READ_BYTES;
     r = call(&in, &out);
-    if (r) return r;
+    if (r) { key_info_forget(key); return r; }
     memcpy(v->bytes, out.bytes, sizeof(v->bytes));
     return 0;
 }

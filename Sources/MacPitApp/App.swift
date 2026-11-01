@@ -23,7 +23,24 @@ final class Monitor: ObservableObject {
     @Published var top = TopProcesses()
     /// 패널이 열려 있을 때만 상위 프로세스 수집 (ps 실행 비용 절약)
     /// MenuBarExtra(.window) 는 닫혀도 onDisappear 가 안 와서 창의 isVisible 로 판단
-    weak var panelWindow: NSWindow?
+    weak var panelWindow: NSWindow? {
+        didSet {
+            guard panelWindow !== oldValue else { return }
+            if let o = visObserver { NotificationCenter.default.removeObserver(o); visObserver = nil }
+            guard let w = panelWindow else { return }
+            // 패널이 다시 보이는 순간 숨겨져 있던 동안의 최신 값을 반영
+            visObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: w, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if self?.panelVisible == true { self?.flushPending() } }
+            }
+            if panelVisible { flushPending() }   // 첫 오픈: 창을 알게 된 시점에 이미 보이는 중
+        }
+    }
+    private var visObserver: NSObjectProtocol?
+    /// 패널이 닫혀 있는 동안 받은 최신 샘플 (화면 갱신 없이 보관)
+    private var pending: (ThermalSnapshot, SystemSample, DaemonStatus?, String?)?
+    private var curT = ThermalSnapshot(cpuAvg: nil, cpuMax: nil, gpuAvg: nil, fans: [])
+    private var curS = SystemSample()
+    private var bgTemp: [Double] = [], bgCPU: [Double] = []
     var forcePanelVisible = false     // 스냅샷용
     var panelVisible: Bool { forcePanelVisible || panelWindow?.isVisible == true }
     /// 메뉴바 라벨 전용 — 문자열이 바뀔 때만 publish 해서 상태 아이템 재그리기 최소화
@@ -32,6 +49,16 @@ final class Monitor: ObservableObject {
     @Published var barItems: [BarItem] = BarItem.load() {
         didSet { BarItem.save(barItems); updateLabel() }
     }
+    /// 메뉴바 항목 표시 순서 (꺼진 항목 포함, 설정 창에서 드래그로 변경)
+    @Published var barOrder: [BarItem] = BarItem.loadOrder() {
+        didSet { BarItem.saveOrder(barOrder); barItems = barOrder.filter(barItems.contains) }
+    }
+    func setBarItem(_ item: BarItem, _ on: Bool) {
+        var s = Set(barItems)
+        if on { s.insert(item) } else { s.remove(item) }
+        barItems = barOrder.filter(s.contains)
+    }
+    func resetBarItems() { barOrder = BarItem.allCases; barItems = BarItem.defaults }
     private var tick = 0
 
     private let sensors = Sensors()
@@ -43,6 +70,7 @@ final class Monitor: ObservableObject {
     private var inserts = 0
 
     init() {
+        barItems = barOrder.filter(barItems.contains)
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -84,13 +112,23 @@ final class Monitor: ObservableObject {
     }
 
     private func apply(_ t: ThermalSnapshot, _ s: SystemSample, _ st: DaemonStatus?, _ err: String?) {
-        thermal = t; sys = s; daemon = st; daemonError = err
-        if let c = st?.config, !configDirty { config = c }
-        if let v = t.cpuMax { tempHistory.append(v); if tempHistory.count > 90 { tempHistory.removeFirst() } }
-        cpuHistory.append((s.cpuUser + s.cpuSystem) * 100); if cpuHistory.count > 90 { cpuHistory.removeFirst() }
+        curT = t; curS = s
+        if let v = t.cpuMax { bgTemp.append(v); if bgTemp.count > 90 { bgTemp.removeFirst() } }
+        bgCPU.append((s.cpuUser + s.cpuSystem) * 100); if bgCPU.count > 90 { bgCPU.removeFirst() }
+        // 패널이 닫혀 있으면 @Published 를 건드리지 않음 → 숨은 SwiftUI 트리 재계산 0
+        if panelVisible { publish(t, s, st, err) } else { pending = (t, s, st, err) }
         record(t, s)
         updateLabel()
     }
+
+    private func publish(_ t: ThermalSnapshot, _ s: SystemSample, _ st: DaemonStatus?, _ err: String?) {
+        pending = nil
+        thermal = t; sys = s; daemon = st; daemonError = err
+        if let c = st?.config, !configDirty { config = c }
+        tempHistory = bgTemp; cpuHistory = bgCPU
+    }
+
+    func flushPending() { if let p = pending { publish(p.0, p.1, p.2, p.3) } }
 
     private func updateLabel() {
         let title = menuTitle
@@ -131,19 +169,19 @@ final class Monitor: ObservableObject {
     }
 
     var menuTitle: String {
-        BarItem.allCases.filter(barItems.contains).compactMap { item -> String? in
+        barItems.compactMap { item -> String? in
             switch item {
-            case .cpu: return "\(Int(((sys.cpuUser + sys.cpuSystem) * 100).rounded()))%"
-            case .temp: return thermal.cpuMax.map { "\(Int($0.rounded()))°" } ?? "--°"
+            case .cpu: return "\(Int(((curS.cpuUser + curS.cpuSystem) * 100).rounded()))%"
+            case .temp: return curT.cpuMax.map { "\(Int($0.rounded()))°" } ?? "--°"
             case .mem:
-                guard sys.memTotal > 0 else { return nil }
-                return "M\(Int((Double(sys.memUsed) / Double(sys.memTotal) * 100).rounded()))%"
-            case .gpu: return thermal.gpuAvg.map { "G\(Int($0.rounded()))°" }
+                guard curS.memTotal > 0 else { return nil }
+                return "M\(Int((Double(curS.memUsed) / Double(curS.memTotal) * 100).rounded()))%"
+            case .gpu: return curT.gpuAvg.map { "G\(Int($0.rounded()))°" }
             case .fan:
-                guard !thermal.fans.isEmpty else { return nil }   // 팬리스면 생략
-                let rpm = thermal.fans.map(\.actual).max() ?? 0
+                guard !curT.fans.isEmpty else { return nil }   // 팬리스면 생략
+                let rpm = curT.fans.map(\.actual).max() ?? 0
                 return rpm < 1 ? "0" : String(format: "%.1fk", rpm / 1000)
-            case .net: return "↓" + compactRate(sys.netIn)
+            case .net: return "↓" + compactRate(curS.netIn)
             }
         }.joined(separator: " ")
     }
@@ -170,6 +208,14 @@ enum BarItem: String, CaseIterable, Identifiable {
         return raw.compactMap(BarItem.init(rawValue:))
     }
     static func save(_ v: [BarItem]) { UserDefaults.standard.set(v.map(\.rawValue), forKey: key) }
+    private static let orderKey = "menuBarOrder"
+    /// 저장된 순서 + 새로 생긴 항목은 뒤에 (구버전은 기본 순서)
+    static func loadOrder() -> [BarItem] {
+        var order: [BarItem] = []
+        for i in (UserDefaults.standard.stringArray(forKey: orderKey) ?? []).compactMap(BarItem.init(rawValue:)) where !order.contains(i) { order.append(i) }
+        return order + allCases.filter { !order.contains($0) }
+    }
+    static func saveOrder(_ v: [BarItem]) { UserDefaults.standard.set(v.map(\.rawValue), forKey: orderKey) }
 }
 
 /// 메뉴바용 짧은 속도 표기: 512K, 1.2M
@@ -210,6 +256,47 @@ func compactRate(_ bps: Double) -> String {
     }
 }
 
+/// 검증용: `MacPit --ui-test <dir>` → 실제 NSWindow 에 패널을 띄우고 팬 모드를 바꿔가며 창 높이 추적 + 실제 컨트롤 캡처
+@MainActor func runUITest(_ dir: String) {
+    let m = Monitor()
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 1400), styleMask: [.borderless], backing: .buffered, defer: false)
+    w.contentView = NSHostingView(rootView: PanelView().environmentObject(m))
+    w.setFrameTopLeftPoint(NSPoint(x: 0, y: (NSScreen.main?.visibleFrame.maxY ?? 1000)))
+    w.orderFrontRegardless()
+    func cap(_ v: NSView, _ name: String) {
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+    }
+    let modes: [FanMode] = [.system, .system, .curve, .system, .curve, .manual]
+    var i = 0
+    Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { t in
+        MainActor.assumeIsolated {
+            if i > 0, let v = w.contentView {
+                print("mode=\(modes[i - 1].rawValue) window=\(Int(w.frame.height)) fitting=\(Int(v.fittingSize.height)) top=\(Int(w.frame.maxY))")
+                cap(v, "panel-\(i)-\(modes[i - 1].rawValue)")
+            }
+            if i == modes.count {
+                t.invalidate()
+                let saved = (m.barOrder, m.barItems)
+                print("bar before: \(m.barOrder.map(\.rawValue)) title=\(m.menuTitle)")
+                m.barOrder.move(fromOffsets: IndexSet(integer: m.barOrder.firstIndex(of: .fan)!), toOffset: 0)
+                m.setBarItem(.net, true)
+                print("bar after:  \(m.barOrder.map(\.rawValue)) title=\(m.menuTitle) saved=\(UserDefaults.standard.stringArray(forKey: "menuBarOrder") ?? [])")
+                m.barOrder = saved.0; m.barItems = saved.1
+                let sw = NSWindow(contentRect: NSRect(x: 400, y: 200, width: 380, height: 460), styleMask: [.titled], backing: .buffered, defer: false)
+                sw.contentView = NSHostingView(rootView: SettingsView().environmentObject(m))
+                sw.orderFrontRegardless()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { cap(sw.contentView!, "settings"); exit(0) }
+                return
+            }
+            m.panelWindow = w
+            m.configDirty = true; m.config.mode = modes[i]
+            i += 1
+        }
+    }
+}
+
 @MainActor func writePNG<V: View>(_ v: V, _ path: String) {
     let r = ImageRenderer(content: v)
     r.scale = 2
@@ -226,6 +313,11 @@ struct MacPitEntry {
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             _ = NSApplication.shared
             MainActor.assumeIsolated { runSnapshot(args[i + 1]) }
+            RunLoop.main.run()
+        } else if let i = args.firstIndex(of: "--ui-test"), i + 1 < args.count {
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.accessory)
+            MainActor.assumeIsolated { runUITest(args[i + 1]) }
             RunLoop.main.run()
         } else if let i = args.firstIndex(of: "--history-snapshot"), i + 1 < args.count {
             _ = NSApplication.shared

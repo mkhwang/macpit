@@ -31,18 +31,37 @@ struct Sparkline: View {
     }
 }
 
+final class Flag: ObservableObject { @Published var on = false }
+final class PanelLayout: ObservableObject { @Published var contentHeight: CGFloat = 0 }
+
 struct Section<Content: View>: View {
     var title: String
     var icon: String
+    /// 있으면 섹션 전체가 클릭 영역 (헤더 오른쪽에 안내 표시)
+    var hint: String? = nil
+    var onTap: (() -> Void)? = nil
     @ViewBuilder var content: Content
+    @StateObject private var hover = Flag()
+    private var hovering: Bool { hover.on }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Label(title, systemImage: icon).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if let hint {
+                    Spacer()
+                    Label(hint, systemImage: "arrow.up.forward.app")
+                        .font(.caption2).foregroundStyle(hovering ? Color.accentColor : .secondary)
+                }
+            }
             content
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(hovering ? 0.9 : 0.5)))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { onTap?() }
+        .onHover { h in if onTap != nil, hover.on != h { hover.on = h } }
+        .help(hint ?? "")
     }
 }
 
@@ -61,8 +80,10 @@ struct Bar: View {
 
 struct PanelView: View {
     @EnvironmentObject var m: Monitor
+    @StateObject private var layout = PanelLayout()
+    private var contentHeight: CGFloat { layout.contentHeight }
 
-    var body: some View {
+    var sections: some View {
         VStack(spacing: 8) {
             thermalSection
             fanSection
@@ -70,13 +91,45 @@ struct PanelView: View {
             if m.thermal.fans.contains(where: \.controllable) { controlSection }
             systemSection
             StorageSummarySection()
-            footer
         }
         .padding(10)
-        .frame(width: 340)
-        .background {
-            // 스냅샷(ImageRenderer)은 NSView 를 못 그려서 제외
-            if !m.forcePanelVisible { WindowAccessor { w in if m.panelWindow !== w { m.panelWindow = w } } }
+    }
+
+    var body: some View {
+        if m.forcePanelVisible {
+            // 스냅샷(ImageRenderer)은 ScrollView·NSView 를 못 그려서 평면 배치
+            VStack(spacing: 0) { sections; footer }.frame(width: 340)
+        } else {
+            VStack(spacing: 0) {
+                ScrollView(.vertical) {
+                    sections.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in if abs(layout.contentHeight - h) > 0.5 { layout.contentHeight = h } }
+                }
+                .scrollIndicators(contentHeight > scrollMax ? .automatic : .never)
+                .frame(height: contentHeight > 0 ? min(contentHeight, scrollMax) : nil)
+                footer
+            }
+            .frame(width: 340)
+            .background { WindowAccessor { w in if m.panelWindow !== w { m.panelWindow = w } } }
+            // MenuBarExtra 창은 내용이 줄어도 스스로 작아지지 않아 위·아래 여백이 생김 → 직접 맞춤
+            .onChange(of: contentHeight) { fitWindow() }
+        }
+    }
+
+    /// 화면보다 길면 스크롤 (푸터 높이·여유분 제외)
+    var scrollMax: CGFloat {
+        let screen = m.panelWindow?.screen ?? NSScreen.main
+        return max(300, (screen?.visibleFrame.height ?? 900) - 70)
+    }
+
+    func fitWindow() {
+        DispatchQueue.main.async {
+            guard let w = m.panelWindow, let v = w.contentView else { return }
+            let h = v.fittingSize.height
+            guard h > 0, abs(w.frame.height - h) > 0.5 else { return }
+            var f = w.frame
+            f.origin.y += f.height - h   // 위쪽(메뉴바) 고정
+            f.size.height = h
+            w.setFrame(f, display: true)
         }
     }
 
@@ -229,7 +282,7 @@ struct PanelView: View {
 
     // MARK: 시스템
     var systemSection: some View {
-        Section(title: "시스템", icon: "cpu") {
+        Section(title: "시스템", icon: "cpu", hint: "활성 상태 보기", onTap: openActivityMonitor) {
             row("CPU", "\(Int((m.sys.cpuUser + m.sys.cpuSystem) * 100))%  (user \(Int(m.sys.cpuUser * 100)) · sys \(Int(m.sys.cpuSystem * 100)))",
                 frac: m.sys.cpuUser + m.sys.cpuSystem, color: .purple)
             Sparkline(values: m.cpuHistory, range: 0...100, color: .purple).frame(height: 24)
@@ -277,33 +330,23 @@ struct PanelView: View {
     }
 
     var footer: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text(m.daemon.map { "macpitd \($0.version)" } ?? "macpitd 없음").font(.caption2).foregroundStyle(.secondary)
             Spacer()
-            Menu("설정") {
-                Text("메뉴바 표시")
-                ForEach(BarItem.allCases) { item in
-                    Toggle(item.label, isOn: Binding(
-                        get: { m.barItems.contains(item) },
-                        set: { on in
-                            if on { if !m.barItems.contains(item) { m.barItems.append(item) } }
-                            else { m.barItems.removeAll { $0 == item } }
-                        }))
-                }
-                Divider()
-                Button("기본값 (CPU·온도·메모리·팬)") { m.barItems = BarItem.defaults }
-                Divider()
-                Toggle("로그인 시 실행", isOn: Binding(get: { m.loginEnabled }, set: { m.setLogin($0) }))
-                if m.daemon != nil {
-                    Button("팬 제어 데몬 제거…") { m.setupDaemon(.uninstall) }.disabled(m.setupBusy || !DaemonSetup.available)
-                }
-                Divider()
-                Link("GitHub · 문제 제보", destination: Links.repo)
-            }
-            .menuStyle(.borderlessButton).fixedSize().font(.caption)
-            Button("히스토리…") { HistoryWindow.show() }.buttonStyle(.borderless).font(.caption)
-            Button("종료") { NSApp.terminate(nil) }.buttonStyle(.borderless).font(.caption)
+            Button { SettingsWindow.show(m) } label: { Label("설정", systemImage: "gearshape") }
+            Button { HistoryWindow.show() } label: { Label("히스토리", systemImage: "chart.xyaxis.line") }
+            Button { NSApp.terminate(nil) } label: { Label("종료", systemImage: "power") }
         }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
+    }
+
+    func openActivityMonitor() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     func fmt(_ v: Double?) -> String { v.map { String(format: "%.0f", $0) } ?? "--" }
