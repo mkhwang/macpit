@@ -26,6 +26,7 @@ Requires an Apple Silicon Mac and macOS 14 or later.
 **Homebrew**
 ```bash
 brew tap mkhwang/macmon https://github.com/mkhwang/macmon
+brew trust mkhwang/macmon     # Homebrew 5+: allow casks from this tap
 brew install --cask mkhwang/macmon/macmon
 ```
 

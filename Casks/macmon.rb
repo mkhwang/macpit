@@ -1,5 +1,6 @@
 # Homebrew cask (이 저장소 자체가 tap):
 #   brew tap mkhwang/macmon https://github.com/mkhwang/macmon
+#   brew trust mkhwang/macmon   # Homebrew 5+: 비공식 tap 허용
 #   brew install --cask mkhwang/macmon/macmon
 # version·sha256 은 릴리스 워크플로가 갱신한다.
 cask "macmon" do

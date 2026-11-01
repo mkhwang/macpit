@@ -3,6 +3,7 @@
 **Homebrew**
 ```bash
 brew tap mkhwang/macmon https://github.com/mkhwang/macmon
+brew trust mkhwang/macmon     # Homebrew 5+: allow casks from this tap
 brew install --cask mkhwang/macmon/macmon
 ```
 

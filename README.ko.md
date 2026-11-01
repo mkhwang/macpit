@@ -88,6 +88,7 @@ macmonctl bench                # 센서·통계 수집 비용 측정 (진단용)
 **Homebrew**
 ```bash
 brew tap mkhwang/macmon https://github.com/mkhwang/macmon
+brew trust mkhwang/macmon     # 비공식 tap 허용 (최신 Homebrew)
 brew install --cask mkhwang/macmon/macmon
 ```
 
