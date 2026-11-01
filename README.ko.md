@@ -116,7 +116,7 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacPit.app + �
 | `macpitd` (팬 제어 데몬) | LaunchDaemon — **부팅 시** 시작, 죽으면 재시작 (`KeepAlive`) |
 | `MacPit.app` (메뉴바) | 로그인 항목 — 설정 창에서 켜고 끔 |
 
-- 제거: 앱 설정 창 → 팬 제어 데몬 제거, 또는 `sudo ./scripts/uninstall.sh` (팬을 macOS 에 반납한 뒤 제거)
+- 제거: 앱 설정 창 → 팬 제어 데몬 제거, `brew uninstall --zap --cask macpit`, 또는 `sudo ./scripts/uninstall.sh` (팬을 macOS 에 반납한 뒤 제거)
 - 데몬 로그: `/var/log/macpitd.log`
 - 앱보다 오래된 데몬이 돌고 있으면 패널에 **데몬 업데이트** 버튼이 뜬다
 
