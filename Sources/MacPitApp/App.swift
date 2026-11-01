@@ -15,7 +15,7 @@ final class Monitor: ObservableObject {
     let model = hardwareModel()
     var modelTested: Bool { fanControlTestedModels.contains(model) }
     /// 데몬이 앱과 다른 버전이면 재설치 권장
-    var daemonOutdated: Bool { daemon.map { $0.version != macpitVersion } ?? false }
+    var daemonOutdated: Bool { daemon.map { $0.version != macpitDaemonVersion } ?? false }
     @Published var tempHistory: [Double] = []
     @Published var cpuHistory: [Double] = []
     @Published var config = FanConfig()

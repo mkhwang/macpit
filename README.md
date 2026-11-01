@@ -79,7 +79,7 @@ Stats is the better general-purpose system monitor. MacPit is for developers who
 | Target temp | Keeps the hottest CPU core near a target with a PI loop, hands back to macOS once cool |
 
 Safety:
-- Above the safety temperature (default 95°C) fans go to 100% in every mode.
+- When the CPU or GPU reaches the safety temperature (default 95°C, max 100°C) fans go to 100% in every mode.
 - Sensor read failure or helper shutdown (SIGTERM etc.) returns fans to macOS immediately.
 - Output changes at most ±8% per second.
 - On start, clears forced modes left by a previous crash.
@@ -187,7 +187,7 @@ MACPIT_FAKE_FANS=0 .build/debug/macpitctl sensors                  # pretend to 
 MACPIT_HOME=/tmp/fakehome .build/debug/macpitctl clean safe --yes  # cleanup in a fake home
 ```
 
-Releases: bump `macpitVersion` in `Sources/MacPitCore/Version.swift`, push a `v<version>` tag. GitHub Actions builds the DMG, creates the release and updates the cask.
+Releases: bump `macpitVersion` in `Sources/MacPitCore/Version.swift` (and `macpitDaemonVersion` only if `macpitd`, `FanPolicy`, SMC code or the install scripts changed), push a `v<version>` tag on a `main` commit. GitHub Actions builds the DMG, creates the release and updates the cask.
 
 ## Limitations
 

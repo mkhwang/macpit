@@ -5,7 +5,7 @@ import MacPitCore
 // 1초 제어 루프 구조:
 //   주기적으로 F{n}Md=1(강제) + F{n}Tg(목표 RPM) 재기록, 안전 온도·센서 실패 시 system 반납, 종료 시 반납.
 
-let version = macpitVersion
+let version = macpitDaemonVersion
 setvbuf(stdout, nil, _IOLBF, 0)
 
 func log(_ s: String) {
@@ -33,6 +33,8 @@ final class State: @unchecked Sendable {
     var config = FanConfig()
     var engine = FanPolicyEngine()
     var forced = false
+    /// 종료 중: tick 이 반납 이후 다시 강제 모드를 쓰지 않도록
+    var shuttingDown = false
     var lastDecision = FanDecision(percent: nil, reason: "init")
     var controlTemp: Double?
     var snapshot = ThermalSnapshot(cpuAvg: nil, cpuMax: nil, gpuAvg: nil, fans: [])
@@ -77,7 +79,7 @@ func applyPercent(_ p: Double) {
         let i = f.index
         let mn = smc.double("F\(i)Mn") ?? f.min
         let mx = smc.double("F\(i)Mx") ?? f.max
-        guard mx > mn else { continue }
+        guard mn > 0, mx > mn else { continue }   // Mn 일시 읽기 실패 시 Tg=0(정지) 강제 방지
         let rpm = percentToRPM(p, min: mn, max: mx)
         do {
             // thermalmonitord 가 모드를 되돌릴 수 있어서 매 틱 확인 후 재기록
@@ -93,6 +95,7 @@ func applyPercent(_ p: Double) {
 
 func tick() {
     state.lock.lock(); defer { state.lock.unlock() }
+    guard !state.shuttingDown else { return }
     let snap = sensors.snapshot()
     state.snapshot = snap
     state.controlTemp = snap.cpuMax
@@ -100,7 +103,9 @@ func tick() {
         state.lastDecision = FanDecision(percent: nil, reason: "no-fans")
         return
     }
-    let d = state.engine.decide(config: state.config, temp: snap.cpuMax)
+    let gpuMax = snap.groups.first { $0.id == "gpu" }?.max ?? snap.gpuAvg
+    let hottest = [snap.cpuMax, gpuMax].compactMap { $0 }.max()
+    let d = state.engine.decide(config: state.config, temp: snap.cpuMax, hottest: hottest)
     if d.reason != state.lastDecision.reason {
         log("decision: \(d.reason) \(d.percent.map { String(format: "%.0f%%", $0) } ?? "-") temp=\(snap.cpuMax.map { String(format: "%.1f", $0) } ?? "-")")
     }
@@ -114,7 +119,10 @@ for sig in [SIGTERM, SIGINT, SIGHUP] {
     let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
     src.setEventHandler {
         log("signal \(sig) — releasing fans")
-        state.lock.lock(); releaseFans(); state.lock.unlock()
+        // 락을 쥔 채로 종료: 반납 직후 대기 중이던 tick 이 강제 모드를 다시 쓰는 경합 방지
+        state.lock.lock()
+        state.shuttingDown = true
+        releaseFans()
         unlink(daemonSocketPath)
         exit(0)
     }

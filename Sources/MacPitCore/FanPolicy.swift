@@ -35,7 +35,7 @@ public struct FanConfig: Codable, Equatable, Sendable {
         var c = self
         c.manualPercent = clamp(manualPercent, 0, 100, 50)
         c.targetTemp = clamp(targetTemp, 40, 95, 70)
-        c.safetyTemp = clamp(safetyTemp, 60, 105, 95)
+        c.safetyTemp = clamp(safetyTemp, 60, 100, 95)
         c.releaseBelowPercent = clamp(releaseBelowPercent, 0, 50, 1)
         let pts = curve.prefix(16).filter { $0.temp.isFinite && $0.percent.isFinite }
             .map { CurvePoint(Swift.max(0, Swift.min(130, $0.temp)), Swift.max(0, Swift.min(100, $0.percent))) }
@@ -110,7 +110,8 @@ public struct FanPolicyEngine: Sendable {
     }
 
     /// temp: 제어용 CPU 온도 (max 코어). nil = 센서 실패
-    public mutating func decide(config: FanConfig, temp: Double?) -> FanDecision {
+    /// hottest: 안전 판정용 최고 온도 (CPU·GPU 중 높은 값). nil 이면 temp 로 판정
+    public mutating func decide(config: FanConfig, temp: Double?, hottest: Double? = nil) -> FanDecision {
         guard let raw = temp, raw.isFinite else {   // NaN 센서값이 EMA 에 고착되지 않게
             reset()
             return FanDecision(percent: nil, reason: "sensor-unavailable")
@@ -123,7 +124,7 @@ public struct FanPolicyEngine: Sendable {
             reset(); smoothed = t
             return FanDecision(percent: nil, reason: "system")
         }
-        if t >= config.safetyTemp {
+        if t >= config.safetyTemp || (hottest.map { $0.isFinite && $0 >= config.safetyTemp } ?? false) {
             lastPercent = 100
             return FanDecision(percent: 100, reason: "safety")
         }

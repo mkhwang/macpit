@@ -11,11 +11,18 @@ MacPit has two parts with different privileges.
 
 - Listens only on `/var/run/macpitd.sock`, mode `0600`, owned by the user who installed it. Other users cannot talk to it.
 - Accepts two commands: `status` and `setConfig` (fan mode, percent, curve, target temperature). It never runs shell commands, never touches files other than its own config (`/Library/Application Support/MacPit/config.json`) and log (`/var/log/macpitd.log`).
-- Returns fans to macOS on exit, on SIGTERM, on sensor read failure, and at startup if a previous crash left them forced.
-- Forces 100% above the safety temperature (default 95°C) regardless of mode.
+- Returns fans to macOS on exit, on SIGTERM, on sensor read failure, and at startup if a previous crash left them forced. On SIGTERM the control loop is stopped before fans are released, so it cannot re-force them during shutdown.
+- Forces 100% when the CPU **or** GPU reaches the safety temperature (default 95°C, cannot be set above 100°C) regardless of mode.
+- Only writes the fan keys `F{n}Md` and `F{n}Tg`. A fan whose minimum RPM cannot be read is treated as read-only, so 0% can never mean "fan stopped".
 - The installer copies the helper from the app bundle to `/Library/PrivilegedHelperTools/` (root-owned), so later changes to the app bundle cannot change what runs as root until you reinstall.
-- The flip side: *installing* runs the helper and script from the app bundle, which your user account can modify. Malware already running as your user could tamper with the bundle before you click **팬 제어 설치…** and get root when you enter the password. This is the same trust you give any app that asks for an admin password; signed (Developer ID) builds would close it and are not available for this free project. Only click install right after downloading a release you verified with `SHA256SUMS`.
+- The flip side: *installing* runs the helper and script from the app bundle, which your user account can modify. Malware already running as your user could tamper with the bundle before you click **팬 제어 설치…** and get root when you enter the password. This is the same trust you give any app that asks for an admin password; signed (Developer ID) builds would close it and are not available for this free project. To keep that window small, the app asks to update the helper only when the helper itself changed (`macpitDaemonVersion`), not on every app release. Be suspicious of an unexpected password prompt.
 - The helper accepts requests only from root and the installing user (socket mode 0600). All config values are clamped and non-finite numbers are rejected, reads have a 3-second deadline, and at most 4 requests are handled at once.
+
+## Release pipeline
+
+- Releases are built by GitHub Actions only from `v*` tags that point to a commit already on `main`; the workflow refuses other tags before it builds or updates the Homebrew cask.
+- Third-party actions are pinned to a commit SHA.
+- Builds are ad-hoc signed, not notarized. The cask and `SHA256SUMS` carry the checksum computed by the same workflow.
 
 ## Cache cleanup
 

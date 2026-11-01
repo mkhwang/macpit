@@ -39,9 +39,11 @@ public func detectFans(read: (String) -> Double?, probeLimit: Int = 8) -> [FanSp
     for i in range {
         guard let ac = read("F\(i)Ac"), ac.isFinite, ac >= 0 else { continue }
         let mx = read("F\(i)Mx") ?? 0
-        let mn = read("F\(i)Mn") ?? 0
+        let mnRaw = read("F\(i)Mn")
+        let mn = mnRaw ?? 0
         guard mx > 0, mx < 20000 else { continue }   // Mx 없음/쓰레기 → 팬 아님
-        let ctl = mx > mn && read("F\(i)Md") != nil && read("F\(i)Tg") != nil
+        // Mn 을 못 읽으면 0% 가 Tg=0(팬 정지 강제)이 될 수 있어 제어 불가로 취급
+        let ctl = mnRaw.map { $0.isFinite && $0 > 0 } == true && mx > mn && read("F\(i)Md") != nil && read("F\(i)Tg") != nil
         out.append(FanSpec(index: i, min: mn, max: mx, controllable: ctl))
     }
     return out

@@ -35,6 +35,8 @@ struct FanPolicyTests {
         ("testSanitizeConfig", testSanitizeConfig),
         ("testNonFiniteCurveRecovers", testNonFiniteCurveRecovers),
         ("testCleanerRejectsInnerSymlink", testCleanerRejectsInnerSymlink),
+        ("testSafetyUsesHottest", testSafetyUsesHottest),
+        ("testFanWithoutMinNotControllable", testFanWithoutMinNotControllable),
     ]
 
     func testParsePS() {
@@ -185,6 +187,21 @@ struct FanPolicyTests {
         // FNum 키 자체가 없지만 F0 이 있음 → 탐침으로 1개
         let f = detectFans(read: Self.smc(Self.fan(0)))
         expect(f.count == 1, "\(f)")
+    }
+    func testSafetyUsesHottest() {
+        // CPU 는 낮아도 GPU 가 안전 온도 이상이면 수동 0% 를 무시하고 100%
+        var e = FanPolicyEngine()
+        var c = FanConfig(); c.mode = .manual; c.manualPercent = 0
+        expect(e.decide(config: c, temp: 50, hottest: 97).percent == 100)
+        expect(e.decide(config: c, temp: 50, hottest: 60).percent == 0)
+        c.safetyTemp = 200
+        expect(c.sanitized().safetyTemp == 100, "safety cap")
+    }
+    func testFanWithoutMinNotControllable() {
+        // Mn 을 못 읽으면 0% = Tg 0(정지 강제) 위험 → 제어 대상에서 제외
+        var parts = Self.fan(0); parts.removeValue(forKey: "F0Mn")
+        let f = detectFans(read: Self.smc(["FNum": 1], parts))
+        expect(f.count == 1 && !f[0].controllable, "\(f)")
     }
     func testDetectReadOnlyFan() {
         // Md/Tg 없음 또는 Mn==Mx → 표시만, 제어 대상 아님

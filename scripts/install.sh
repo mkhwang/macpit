@@ -12,12 +12,15 @@ OWNER=$(id -un "$OWNER_UID")
 ./scripts/install-daemon.sh build/macpitd build/macpitctl "$OWNER_UID"
 
 # 앱: ~/Applications + 로그인 LaunchAgent
-HOME_DIR=$(eval echo "~$OWNER")
+# eval 대신 디렉터리 서비스에서 홈 경로 조회
+HOME_DIR=$(dscl . -read "/Users/$OWNER" NFSHomeDirectory | sed 's/^NFSHomeDirectory: //')
+[ -d "$HOME_DIR" ] || { echo "홈 디렉터리 확인 실패: $OWNER"; exit 1; }
 sudo -u "$OWNER" mkdir -p "$HOME_DIR/Applications" "$HOME_DIR/Library/LaunchAgents"
-rm -rf "$HOME_DIR/Applications/MacPit.app"
+# 사용자 홈 아래 파일은 사용자 권한으로만 지운다 (심링크로 시스템 경로를 가리키게 해도 root 삭제가 일어나지 않게)
+sudo -u "$OWNER" rm -rf "$HOME_DIR/Applications/MacPit.app"
 # 0.1.x(MacMon) 앱·로그인 항목 정리 (히스토리·설정은 MacPit 첫 실행 시 이전됨)
-pkill -f "MacMon.app/Contents/MacOS/MacMon" || true
-rm -rf "$HOME_DIR/Applications/MacMon.app" "$HOME_DIR/Library/LaunchAgents/com.mkhwang.macmon.plist"
+pkill -u "$OWNER_UID" -f "MacMon.app/Contents/MacOS/MacMon" || true
+sudo -u "$OWNER" rm -rf "$HOME_DIR/Applications/MacMon.app" "$HOME_DIR/Library/LaunchAgents/com.mkhwang.macmon.plist"
 sudo -u "$OWNER" cp -R build/MacPit.app "$HOME_DIR/Applications/"
 AGENT="$HOME_DIR/Library/LaunchAgents/com.mkhwang.macpit.plist"
 sudo -u "$OWNER" tee "$AGENT" >/dev/null <<PL

@@ -204,7 +204,7 @@ struct PanelView: View {
     @ViewBuilder var setupRow: some View {
         if m.daemon == nil || m.daemonOutdated {
             HStack {
-                Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macpitVersion))…") {
+                Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macpitDaemonVersion))…") {
                     m.setupDaemon(.install)
                 }
                 .disabled(m.setupBusy || !DaemonSetup.available)
