@@ -4,8 +4,8 @@
 #   brew install --cask mkhwang/macpit/macpit
 # version·sha256 은 릴리스 워크플로가 갱신한다.
 cask "macpit" do
-  version "0.2.1"
-  sha256 "60b34f447378927eb2ac29d71415517007ed73c938d242d2451904d1bb11cdb9"
+  version "0.2.2"
+  sha256 "312012b92948867a5406eb34d7e617fe9016c06f5087d69a3e848752b13258df"
 
   url "https://github.com/mkhwang/macpit/releases/download/v#{version}/MacPit-#{version}.dmg"
   name "MacPit"
