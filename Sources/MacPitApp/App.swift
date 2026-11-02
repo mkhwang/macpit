@@ -8,6 +8,8 @@ final class Monitor: ObservableObject {
     @Published var sys = SystemSample()
     @Published var daemon: DaemonStatus?
     @Published var daemonError: String?
+    /// 마지막 setConfig 실패 사유 (status 폴링이 지우지 않도록 daemonError 와 분리)
+    @Published var configError: String?
     /// 데몬 설치/제거 진행 상태
     @Published var setupBusy = false
     @Published var setupMessage: String?
@@ -15,6 +17,11 @@ final class Monitor: ObservableObject {
     let model = hardwareModel()
     var modelTested: Bool { fanControlTestedModels.contains(model) }
     /// 데몬이 앱과 다른 버전이면 재설치 권장
+    /// 소켓이 다른 일반 사용자 소유면 그 uid (설치 시 제어권 이전 경고용)
+    var foreignDaemonOwner: uid_t? {
+        guard let o = DaemonClient.socketOwnerUID(), o != 0, o != getuid() else { return nil }
+        return o
+    }
     var daemonOutdated: Bool { daemon.map { $0.version != macpitDaemonVersion } ?? false }
     @Published var tempHistory: [Double] = []
     @Published var cpuHistory: [Double] = []
@@ -92,7 +99,7 @@ final class Monitor: ObservableObject {
             do {
                 let r = try DaemonClient.send(DaemonRequest(cmd: "status"), timeout: 1)
                 st = r.status; err = r.error
-            } catch { err = "데몬 미설치/중지 — 팬 제어 불가 (모니터링만)" }
+            } catch { err = DaemonClient.describe(error) }
             Task { @MainActor in self.apply(t, s, st, err) }
         }
     }
@@ -159,11 +166,17 @@ final class Monitor: ObservableObject {
     func push(_ c: FanConfig) {
         config = c; configDirty = true
         io.async {
-            let r = try? DaemonClient.send(DaemonRequest(cmd: "setConfig", config: c))
+            let result = Result { try DaemonClient.send(DaemonRequest(cmd: "setConfig", config: c)) }
             Task { @MainActor in
                 self.configDirty = false
-                if let s = r?.status { self.daemon = s; self.config = s.config }
-                if r == nil { self.daemonError = "설정 전송 실패" }
+                switch result {
+                case .success(let r):
+                    if let s = r.status { self.daemon = s; self.config = s.config }
+                    // 데몬이 거부하면 config 가 원복되므로 사유를 보여준다
+                    self.configError = r.ok ? nil : "설정 거부: \(r.error ?? "사유 없음")"
+                case .failure(let e):
+                    self.configError = "설정 전송 실패 — \(DaemonClient.describe(e))"
+                }
             }
         }
     }

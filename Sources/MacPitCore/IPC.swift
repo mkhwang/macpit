@@ -42,6 +42,9 @@ public enum DaemonClient {
         var tv = timeval(tv_sec: timeout, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        // 데몬이 먼저 닫아도(동시 연결 상한 초과 등) 클라이언트(앱)가 SIGPIPE 로 죽지 않게
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &addr.sun_path) { buf in
@@ -59,7 +62,32 @@ public enum DaemonClient {
         data.append(0x0a)
         _ = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
         let line = readLine(fd: fd)
+        if line.isEmpty { throw POSIXError(.ETIMEDOUT) }   // 응답 없음 (SO_RCVTIMEO 만료 또는 연결 끊김)
         return try JSONDecoder().decode(DaemonResponse.self, from: line)
+    }
+
+    /// 소켓 소유자 uid (= 데몬 설치 시 지정한 사용자). 소켓이 없으면 nil
+    public static func socketOwnerUID(path: String = daemonSocketPath) -> uid_t? {
+        var st = stat()
+        return stat(path, &st) == 0 ? st.st_uid : nil
+    }
+
+    /// 통신 실패를 사용자 문구로. 원인마다 대응이 달라서(설치/대기/계정 전환) 뭉뚱그리지 않는다
+    public static func describe(_ error: Error, path: String = daemonSocketPath) -> String {
+        switch (error as? POSIXError)?.code {
+        case .ENOENT?:
+            return "데몬 미설치 — 팬 제어 불가 (모니터링만)"
+        case .ECONNREFUSED?:
+            return "데몬 중지됨 — 재시작 대기 중 (모니터링만)"
+        case .EACCES?, .EPERM?:
+            let owner = socketOwnerUID(path: path).map { " (uid \($0))" } ?? ""
+            return "다른 사용자\(owner)가 설치한 데몬 — 이 계정에서는 팬 제어 불가"
+        case .ETIMEDOUT?, .EAGAIN?:
+            return "데몬 응답 없음 (타임아웃)"
+        default:
+            if error is DecodingError { return "데몬 응답 해석 실패 — 앱·데몬 버전 불일치 가능" }
+            return "데몬 통신 실패: \(error.localizedDescription)"
+        }
     }
 
     /// deadline: 연결 전체 읽기 시간 상한 (SO_RCVTIMEO 는 read 1회 단위라 느린 송신자를 못 끊음)

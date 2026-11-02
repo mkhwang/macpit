@@ -81,6 +81,7 @@ struct Bar: View {
 struct PanelView: View {
     @EnvironmentObject var m: Monitor
     @StateObject private var layout = PanelLayout()
+    @State private var confirmTakeover = false
     private var contentHeight: CGFloat { layout.contentHeight }
 
     var sections: some View {
@@ -249,6 +250,7 @@ struct PanelView: View {
             } else if let e = m.daemonError {
                 Text(e).font(.caption2).foregroundStyle(.orange)
             }
+            if let e = m.configError { Text(e).font(.caption2).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             setupRow
         }
     }
@@ -258,7 +260,14 @@ struct PanelView: View {
         if m.daemon == nil || m.daemonOutdated {
             HStack {
                 Button(m.daemon == nil ? "팬 제어 설치…" : "데몬 업데이트 (\(m.daemon?.version ?? "") → \(macpitDaemonVersion))…") {
-                    m.setupDaemon(.install)
+                    // 다른 사용자 소유 데몬을 덮어쓰면 그 사용자의 제어권이 조용히 사라진다 → 확인 후 진행
+                    if m.foreignDaemonOwner != nil { confirmTakeover = true } else { m.setupDaemon(.install) }
+                }
+                .alert("다른 사용자의 팬 제어를 가져올까요?", isPresented: $confirmTakeover) {
+                    Button("이 계정으로 설치", role: .destructive) { m.setupDaemon(.install) }
+                    Button("취소", role: .cancel) {}
+                } message: {
+                    Text("현재 데몬은 uid \(m.foreignDaemonOwner.map(String.init) ?? "?") 사용자가 설치했습니다. 설치하면 그 사용자의 앱에서는 팬 제어가 끊깁니다.")
                 }
                 .disabled(m.setupBusy || !DaemonSetup.available)
                 if m.setupBusy { ProgressView().controlSize(.small) }
