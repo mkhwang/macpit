@@ -117,7 +117,7 @@ func releaseFans() {
         for f in ctlFans { try? smc.write("F\(f.index)Md", value: 0) }
         do {
             try smc.write("Ftst", value: 0)
-            if state.unlockSince != nil { log("Ftst=0 — 팬 제어 시스템 반납") }
+            log(state.unlockSince != nil ? "Ftst=0 — 팬 제어 시스템 반납" : "Ftst=1 잔재(이전 비정상 종료) 정리 — 시스템 반납")
             state.unlockSince = nil
         } catch { errs.append("release Ftst: \(error)") }
     } else {
@@ -150,12 +150,15 @@ func applyPercent(_ p: Double) {
                 do {
                     try smc.write("F\(i)Md", value: 1)
                 } catch where hasFtst && isNotWritable(error) {
-                    if smc.double("Ftst") != 1 {
+                    let now = Date()
+                    // 쓴 직후엔 Ftst 읽기가 늦게 반영돼(실측) 같은 틱의 다음 팬이 중복으로 쓰지 않게 2초 유예.
+                    // 오래전에 해제했는데 시스템이 Ftst 를 되돌린 경우엔 다시 요청하고 대기 시간도 새로 잰다
+                    if state.unlockSince.map({ now.timeIntervalSince($0) > 2 }) ?? true, smc.double("Ftst") != 1 {
                         try smc.write("Ftst", value: 1)
                         log("Ftst=1 — 팬 제어 잠금 해제 요청")
-                        state.unlockSince = Date()
+                        state.unlockSince = now
                     }
-                    let since = state.unlockSince ?? Date()
+                    let since = state.unlockSince ?? now
                     state.unlockSince = since
                     if Date().timeIntervalSince(since) < unlockGrace { continue }   // 해제 대기 중: 다음 틱에 재시도
                     throw error
