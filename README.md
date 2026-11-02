@@ -80,6 +80,8 @@ Stats is the better general-purpose system monitor. MacPit is for developers who
 
 Safety:
 - When the CPU or GPU reaches the safety temperature (default 95°C, max 100°C) fans go to 100% in every mode.
+  - System mode steps in too by default (macOS throttles clocks instead of spinning up, so fans can sit at minimum past 100°C). Once cool it ramps down to safety −10°C and hands back, holding at least 30 s. Untick "안전 온도 이상이면 개입" in the panel to turn it off.
+- Quitting the app does not stop the helper (`macpitd`); it keeps the last setting. In any mode other than System, **종료** asks whether to hand fans back to macOS or keep control. To hand back later: `macpitctl system`.
 - Sensor read failure or helper shutdown (SIGTERM etc.) returns fans to macOS immediately.
 - Output changes at most ±8% per second.
 - On start, clears forced modes left by a previous crash.

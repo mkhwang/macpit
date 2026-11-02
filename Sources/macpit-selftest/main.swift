@@ -12,6 +12,9 @@ struct FanPolicyTests {
         ("testInterpolate", testInterpolate),
         ("testPercentToRPM", testPercentToRPM),
         ("testSystemReleases", testSystemReleases),
+        ("testSystemSafetyEngagesAndReleases", testSystemSafetyEngagesAndReleases),
+        ("testSystemSafetyOffNeverIntervenes", testSystemSafetyOffNeverIntervenes),
+        ("testFanConfigDecodesLegacy", testFanConfigDecodesLegacy),
         ("testSafetyOverridesManual", testSafetyOverridesManual),
         ("testSensorFailureReleases", testSensorFailureReleases),
         ("testTargetRampsUpWhenHot", testTargetRampsUpWhenHot),
@@ -228,7 +231,52 @@ struct FanPolicyTests {
 
     func testSystemReleases() {
         var e = FanPolicyEngine()
-        expect(e.decide(config: FanConfig(), temp: 99).percent == nil)
+        expect(e.decide(config: FanConfig(), temp: 80).percent == nil)
+        expect(e.decide(config: FanConfig(), temp: 94, hottest: 94).percent == nil)
+    }
+
+    func testSystemSafetyEngagesAndReleases() {
+        // 기본(systemSafety=true): 안전 온도 이상이면 100%, 식으면 램프다운 후 최소 유지 시간이 지나야 반납
+        var e = FanPolicyEngine(); let c = FanConfig()
+        let d = e.decide(config: c, temp: 80, hottest: 106)
+        expect(d.percent == 100 && d.reason == "safety", "\(d)")
+        // 안전 온도 바로 아래(90°C, 구간 85~95 의 50%)로 내려와도 한 번에 떨어지지 않음
+        var e2 = FanPolicyEngine()
+        _ = e2.decide(config: c, temp: 96)
+        var p = 100.0
+        for _ in 0..<3 { p = e2.decide(config: c, temp: 90).percent ?? -1 }
+        expect(p >= 100 - 8 * 3 - 0.01 && p < 100, "ramp \(p)")
+        // 충분히 식으면 결국 반납, 이후 다시 system
+        var last = FanDecision(percent: 0, reason: "")
+        var released = -1
+        for i in 0..<120 {
+            last = e2.decide(config: c, temp: 60)
+            if last.percent == nil { released = i; break }
+        }
+        expect(last.percent == nil && last.reason == "system", "\(last)")
+        expect(released == e2.systemSafetyMinTicks - 5, "개입 1틱 + 90°C 3틱 후 최소 유지 시간 만료 시점에 반납: \(released)")
+        expect(e2.systemSafetyTicks == 0)
+        expect(e2.decide(config: c, temp: 60).percent == nil)
+    }
+
+    func testSystemSafetyOffNeverIntervenes() {
+        var e = FanPolicyEngine(); var c = FanConfig(); c.systemSafety = false
+        expect(e.decide(config: c, temp: 110, hottest: 110).percent == nil)
+        // 개입 중 끄면 다음 틱에 반납
+        var e2 = FanPolicyEngine(); var c2 = FanConfig()
+        expect(e2.decide(config: c2, temp: 110).percent == 100)
+        c2.systemSafety = false
+        expect(e2.decide(config: c2, temp: 110).percent == nil)
+    }
+
+    func testFanConfigDecodesLegacy() {
+        // 0.3.1 이하 config.json (systemSafety 없음) → 설정 보존 + 새 필드 기본값
+        let old = #"{"mode":"curve","manualPercent":30,"curve":[{"temp":50,"percent":0},{"temp":85,"percent":100}],"targetTemp":70,"safetyTemp":92,"releaseBelowPercent":1}"#
+        let c = try? JSONDecoder().decode(FanConfig.self, from: Data(old.utf8))
+        expect(c?.mode == .curve && c?.manualPercent == 30 && c?.safetyTemp == 92 && c?.systemSafety == true, "\(String(describing: c))")
+        var n = FanConfig(); n.systemSafety = false
+        let rt = (try? JSONEncoder().encode(n)).flatMap { try? JSONDecoder().decode(FanConfig.self, from: $0) }
+        expect(rt == n, "round trip")
     }
 
     func testSafetyOverridesManual() {
