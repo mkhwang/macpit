@@ -74,8 +74,8 @@ final class StorageModel: ObservableObject {
             var total: Int64 = 0
             var errors: [String] = []
             for t in targets {
-                // 무인 실행은 대상 도구가 켜져 있으면 건너뜀 (빌드 중 Gradle 캐시, 열린 IDE 인덱스 등)
-                if auto, let who = c.busyUser(t) { errors.append("\(t.name): \(who) 실행 중이라 건너뜀"); continue }
+                // 무인 실행은 대상 도구가 켜져 있거나 감지 규칙이 없으면 건너뜀 (빌드 중 Gradle 캐시, 열린 IDE 인덱스 등)
+                if auto, let why = c.autoCleanSkipReason(t) { errors.append("\(t.name): \(why)"); continue }
                 Task { @MainActor in self.cleaning = t.id }
                 let o = c.clean(t)
                 total += o.freed
@@ -86,7 +86,8 @@ final class StorageModel: ObservableObject {
                 for e in r { self.entries[e.id] = e }
                 self.lastScan = Date(); self.cleaning = nil
                 if auto { self.lastAutoClean = Date() }
-                let head = "\(auto ? "자동 정리" : "정리") 완료 — \(formatBytes(Double(total))) 확보"
+                let failed = errors.contains { !$0.hasSuffix("건너뜀") && !$0.hasSuffix("자동 정리 제외") }
+                let head = "\(auto ? "자동 정리" : "정리") \(failed ? "일부 실패" : "완료") — \(formatBytes(Double(total))) 확보"
                 self.lastResult = errors.isEmpty ? head : head + "\n" + errors.prefix(3).joined(separator: "\n")
             }
         }
@@ -161,7 +162,10 @@ struct StorageSummarySection: View {
                 Button("자세히…") { StorageWindow.show() }
             }
             .controlSize(.small)
-            if let r = s.lastResult { Text(r).font(.caption2).foregroundStyle(.secondary).lineLimit(3) }
+            if let r = s.lastResult {
+                Text(r).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                FullDiskAccessButton(result: r)
+            }
         }
         .alert("선택한 캐시를 정리할까요?", isPresented: $s.panelConfirm) {
             Button("정리", role: .destructive) { s.clean(s.selectedTargets) }
@@ -269,12 +273,26 @@ struct StorageView: View {
                 Spacer()
             }
             HStack {
-                if let r = s.lastResult { Text(r).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+                if let r = s.lastResult {
+                    Text(r).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    FullDiskAccessButton(result: r)
+                }
                 Spacer()
                 Button("선택 항목 정리") { s.windowConfirm = true }
                     .buttonStyle(.borderedProminent).tint(.red)
                     .disabled(s.busy || s.selectedTargets.isEmpty)
             }
+        }
+    }
+}
+
+/// 정리 결과에 권한 부족 안내가 있으면 전체 디스크 접근 권한 설정을 바로 연다
+struct FullDiskAccessButton: View {
+    let result: String
+    var body: some View {
+        if result.contains(fullDiskAccessHint) {
+            Button("권한 설정 열기") { NSWorkspace.shared.open(fullDiskAccessSettingsURL) }
+                .controlSize(.small)
         }
     }
 }
