@@ -124,6 +124,7 @@ macpitctl top                  # top processes
 | Model | Chip | Fans | Result |
 |---|---|---|---|
 | `MacBookPro18,1` | M1 Pro | 2 | manual, profile, target temp and hand-back verified |
+| `Mac15,6` | M3 Pro | 2 | manual, hand-back and crash recovery verified (needs `Ftst` unlock) |
 
 On other models fan control is **experimental** and the panel says so. SMC key layouts can change between chips.
 Please [send a device report](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) with the output of `macpitctl sensors`. Each report adds a row here.
@@ -143,7 +144,10 @@ Apple Silicon fans are controlled through SMC keys.
 2. While controlling, every second ensure `Md=1` and write `Tg` (macOS may reset the mode, so it is rewritten).
 3. To hand back, restore the original `Md` and macOS takes over again.
 
+On M3 and later (verified on `Mac15,6`) an idle fan sits at `Md=3`, and writing `Md` is rejected with SMC `0x82`. In that case macpitd writes `Ftst=1` (diagnostic unlock) and retries every tick until `Md` drops to 0 and the fans spin up (about 6 seconds measured). To hand back it writes `Md=0` then `Ftst=0`, and macOS reclaims the fans at `Md=3` within 2–3 seconds.
+
 Measured on a MacBook Pro M1 Pro (`MacBookPro18,1`): manual 60% took the fans from 0 to 3180 / 3440 rpm in about 6 seconds, and hand-back restored `Md=3`.
+Measured on a MacBook Pro M3 Pro (`Mac15,6`): manual 60% from idle unlocked `Ftst` and took the fans from 0 to 5000 rpm in about 6 seconds; hand-back restored `Md=3` in about 2 seconds.
 
 ## Architecture
 

@@ -37,6 +37,10 @@ struct FanPolicyTests {
         ("testCleanerRejectsInnerSymlink", testCleanerRejectsInnerSymlink),
         ("testSafetyUsesHottest", testSafetyUsesHottest),
         ("testFanWithoutMinNotControllable", testFanWithoutMinNotControllable),
+        ("testEverySafeTargetHasBusyRule", testEverySafeTargetHasBusyRule),
+        ("testBusyPatternsMatchToolCommandLines", testBusyPatternsMatchToolCommandLines),
+        ("testCleanReportsUnreadableDir", testCleanReportsUnreadableDir),
+        ("testDaemonErrorClassification", testDaemonErrorClassification),
     ]
 
     func testParsePS() {
@@ -274,6 +278,93 @@ struct FanPolicyTests {
         }
         let avg = tail.reduce(0, +) / Double(tail.count)
         expect(abs(avg - 72) <= 2.0, "steady-state avg \(avg)")
+    }
+
+    /// 자동 정리는 감지 규칙 없는 safe 대상을 건너뛰므로(fail-safe), 규칙이 빠지면 자동 정리가 조용히 무력화된다
+    func testEverySafeTargetHasBusyRule() {
+        for t in cleanTargets where t.risk == .safe {
+            expect(cleanTargetUsers[t.id] != nil, "missing busy rule: \(t.id)")
+        }
+        let c = StorageCleaner(home: NSTemporaryDirectory())
+        let trash = cleanTargets.first { $0.id == "trash" }!
+        expect(c.autoCleanSkipReason(trash) != nil, "caution target must be skipped")
+    }
+
+    /// pgrep -f 와 같은 POSIX ERE 로 실제 커맨드라인 모양에 매칭되는지 (grep -E 사용)
+    func testBusyPatternsMatchToolCommandLines() {
+        func matches(_ id: String, _ cmdline: String) -> Bool {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/grep")
+            p.arguments = ["-qE", cleanTargetUsers[id]!.pattern]
+            let pipe = Pipe(); p.standardInput = pipe
+            try? p.run(); pipe.fileHandleForWriting.write(Data((cmdline + "\n").utf8)); try? pipe.fileHandleForWriting.close()
+            p.waitUntilExit(); return p.terminationStatus == 0
+        }
+        let yes: [(String, String)] = [
+            ("npm", "node /opt/homebrew/bin/npm install"),
+            ("npm", "node /usr/local/lib/node_modules/npm/bin/npm-cli.js ci"),
+            ("pnpm", "node /opt/homebrew/bin/pnpm install"),
+            ("yarn", "node /usr/local/bin/yarn add react"),
+            ("xcode", "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme App build"),
+            ("xcode", "xcodebuild test"),
+            ("spm", "/Library/Developer/CommandLineTools/usr/bin/swift-build -c release"),
+            ("spm", "ruby /usr/local/bin/pod install"),
+            ("python", "/usr/bin/python3 /usr/local/bin/pip install requests"),
+            ("python", "python3 -m pip install x"),
+            ("python", "/opt/homebrew/bin/uv sync"),
+            ("go", "/usr/local/go/bin/go build ./..."),
+            ("cargo", "/Users/me/.cargo/bin/cargo build --release"),
+            ("brew", "/bin/bash /opt/homebrew/Library/Homebrew/brew.sh install wget"),
+            ("docker-build", "docker build -t app ."),
+            ("docker-build", "/usr/local/bin/docker buildx build ."),
+        ]
+        for (id, cmd) in yes { expect(matches(id, cmd), "\(id) should match: \(cmd)") }
+        let no: [(String, String)] = [
+            ("npm", "/Applications/MacPit.app/Contents/MacOS/MacPitApp"),
+            ("go", "/usr/libexec/logd"),
+            ("cargo", "/System/Library/CoreServices/cargoservice"),
+            ("python", "/usr/bin/python3 server.py"),
+        ]
+        for (id, cmd) in no { expect(!matches(id, cmd), "\(id) should not match: \(cmd)") }
+    }
+
+    /// 열거가 권한으로 막히면 '0 확보 성공'이 아니라 에러(+권한 안내)로 보고
+    func testCleanReportsUnreadableDir() {
+        guard getuid() != 0 else { return }   // root 는 권한 무시
+        let fm = FileManager.default
+        let home = NSTemporaryDirectory() + "macpit-perm-\(getpid())"
+        defer { chmod(home + "/.Trash", 0o755); try? fm.removeItem(atPath: home) }
+        try? fm.createDirectory(atPath: home + "/.Trash", withIntermediateDirectories: true)
+        fm.createFile(atPath: home + "/.Trash/a", contents: Data("x".utf8))
+        chmod(home + "/.Trash", 0o000)
+        let c = StorageCleaner(home: home)
+        let o = c.clean(cleanTargets.first { $0.id == "trash" }!)
+        expect(o.error?.contains(fullDiskAccessHint) == true, "\(String(describing: o.error))")
+        // 경로 없음은 에러 아님
+        let o2 = StorageCleaner(home: home + "/nope").clean(cleanTargets.first { $0.id == "trash" }!)
+        expect(o2.error == nil, "\(String(describing: o2.error))")
+    }
+
+    func testDaemonErrorClassification() {
+        let dir = NSTemporaryDirectory() + "macpit-sock-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        func err(_ path: String) -> String {
+            do { _ = try DaemonClient.send(DaemonRequest(cmd: "status"), path: path, timeout: 1); return "ok" }
+            catch { return DaemonClient.describe(error, path: path) }
+        }
+        expect(err(dir + "/none.sock").contains("미설치"), err(dir + "/none.sock"))
+        // 리스너 없는 소켓 파일 → 중지
+        let path = dir + "/d.sock"
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { b in let p = Array(path.utf8); b.copyBytes(from: p); b[p.count] = 0 }
+        _ = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        close(fd)
+        expect(err(path).contains("중지"), err(path))
+        if getuid() != 0 {
+            chmod(path, 0o000)
+            expect(err(path).contains("다른 사용자"), err(path))
+        }
     }
 }
 
