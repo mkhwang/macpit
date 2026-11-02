@@ -239,7 +239,7 @@ func handle(_ fd: Int32) {
                     if c.mode != state.config.mode { state.engine.reset() }
                     state.config = c
                     saveConfig(c)
-                    log("config set: mode=\(c.mode.rawValue) manual=\(c.manualPercent) target=\(c.targetTemp)")
+                    log("config set: mode=\(c.mode.rawValue) manual=\(c.manualPercent) target=\(c.targetTemp) systemSafety=\(c.systemSafety)")
                 }
             } else { resp.ok = false; resp.error = "missing config" }
         case "status": break

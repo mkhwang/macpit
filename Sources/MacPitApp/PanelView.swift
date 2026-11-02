@@ -82,6 +82,7 @@ struct PanelView: View {
     @EnvironmentObject var m: Monitor
     @StateObject private var layout = PanelLayout()
     @State private var confirmTakeover = false
+    @State private var confirmQuit = false
     private var contentHeight: CGFloat { layout.contentHeight }
 
     var sections: some View {
@@ -141,12 +142,14 @@ struct PanelView: View {
                 Text(m.thermal.cpuMax.map { String(format: "%.0f°", $0) } ?? "--")
                     .font(.system(size: 34, weight: .semibold, design: .rounded)).foregroundStyle(tempColor(m.thermal.cpuMax))
                 VStack(alignment: .leading) {
-                    Text("CPU 최고 코어").font(.caption)
+                    Text("CPU 핫스팟\(cpuSensorCount.map { " · 센서 \($0)개 중 최고" } ?? "")").font(.caption)
                     Text("평균 \(fmt(m.thermal.cpuAvg))°  ·  GPU \(fmt(m.thermal.gpuAvg))°").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            Sparkline(values: m.tempHistory, range: 30...100, color: tempColor(m.thermal.cpuMax)).frame(height: 36)
+            .help("CPU 온도 센서 중 가장 뜨거운 지점입니다. Apple Silicon 은 부하 시 100°C 이상도 정상 범위이고, 팬 제어·안전 온도도 이 값을 기준으로 합니다.")
+            // 100°C 넘는 구간(M3 Pro 부하 시 정상)이 잘리지 않게 관측 최대에 맞춰 상한을 10° 단위로 올림
+            Sparkline(values: m.tempHistory, range: 30...sparkTop(m.tempHistory), color: tempColor(m.thermal.cpuMax)).frame(height: 36)
             // CPU 외 센서 그룹 (기기에 있는 것만)
             let others = m.thermal.groups.filter { $0.id != "cpu" }
             if !others.isEmpty {
@@ -208,7 +211,14 @@ struct PanelView: View {
 
             switch m.config.mode {
             case .system:
-                Text("macOS 가 팬을 관리합니다.").font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: Binding(get: { m.config.systemSafety }, set: { var c = m.config; c.systemSafety = $0; m.push(c) })) {
+                    Text("안전 온도 \(Int(m.config.safetyTemp))°C 이상이면 개입").font(.caption)
+                }
+                .toggleStyle(.checkbox).disabled(m.daemon == nil)
+                Text(m.config.systemSafety
+                     ? "평소엔 macOS 가 팬을 관리합니다. macOS 는 고온에서 팬 대신 성능을 낮춰 식히므로, 안전 온도를 넘으면 MacPit 이 팬을 올렸다가 식으면 돌려줍니다."
+                     : "macOS 가 팬을 관리합니다. 고온에서도 팬을 거의 올리지 않고 성능을 낮춰 식힐 수 있습니다.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             case .manual:
                 HStack {
                     Slider(value: Binding(get: { m.config.manualPercent }, set: { m.config.manualPercent = $0; m.configDirty = true }),
@@ -344,7 +354,15 @@ struct PanelView: View {
             Spacer()
             Button { SettingsWindow.show(m) } label: { Label("설정", systemImage: "gearshape") }
             Button { HistoryWindow.show() } label: { Label("히스토리", systemImage: "chart.xyaxis.line") }
-            Button { NSApp.terminate(nil) } label: { Label("종료", systemImage: "power") }
+            Button { if quitNeedsChoice { confirmQuit = true } else { NSApp.terminate(nil) } } label: { Label("종료", systemImage: "power") }
+                .help("앱을 종료합니다. 팬 제어 데몬(macpitd)은 앱과 별개로 계속 실행됩니다.")
+                .alert("팬 제어를 어떻게 할까요?", isPresented: $confirmQuit) {
+                    Button("macOS 에 반납하고 종료") { m.releaseAndQuit() }
+                    Button("제어 유지하고 종료") { NSApp.terminate(nil) }
+                    Button("취소", role: .cancel) {}
+                } message: {
+                    Text("앱을 종료해도 팬 제어 데몬은 계속 실행되며 현재 설정(\(m.daemon.map { FanRunState(status: $0).title } ?? ""))을 유지합니다. 나중에 반납하려면 앱을 다시 열어 '시스템'을 고르거나 `macpitctl system` 을 실행하세요.")
+                }
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -353,12 +371,23 @@ struct PanelView: View {
         .padding(.bottom, 10)
     }
 
+    /// 데몬이 macOS 가 아닌 MacPit 설정으로 팬을 제어 중이면 종료 시 유지/반납을 고르게 한다
+    var quitNeedsChoice: Bool { (m.daemon?.config.mode ?? .system) != .system }
+
     func openActivityMonitor() {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     func fmt(_ v: Double?) -> String { v.map { String(format: "%.0f", $0) } ?? "--" }
+
+    var cpuSensorCount: Int? { m.thermal.groups.first { $0.id == "cpu" }?.count }
+}
+
+/// 스파크라인 상한: 최소 100°, 관측 최대 + 5° 를 10° 단위로 올림
+func sparkTop(_ values: [Double]) -> Double {
+    guard let mx = values.filter(\.isFinite).max() else { return 100 }
+    return max(100, ((mx + 5) / 10).rounded(.up) * 10)
 }
 
 /// 이 뷰가 올라간 NSWindow 를 알려준다 (패널 열림 여부 판단용)

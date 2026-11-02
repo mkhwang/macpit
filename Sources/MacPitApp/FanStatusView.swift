@@ -30,13 +30,19 @@ struct FanRunState {
         let preset = FanPreset.matching(d.config.curve)?.name ?? "사용자 정의"
         switch d.reason {
         case "safety":
-            self.init(title: "안전 모드 · 팬 100%", detail: "\(temp) — 안전 온도 \(Int(d.config.safetyTemp))°C 이상", tone: .danger)
+            self.init(title: "안전 모드 · 팬 100%",
+                      detail: "\(temp) — 안전 온도 \(Int(d.config.safetyTemp))°C 이상" + (d.config.mode == .system ? " (시스템 모드 고온 개입)" : ""), tone: .danger)
+        case "system-safety":
+            self.init(title: "고온 개입 · 팬 \(pct)",
+                      detail: "\(temp) — 식는 중. \(Int(d.config.safetyTemp - FanPolicyEngine.defaultSystemSafetyBand))°C 아래로 내려가면 macOS 에 반납", tone: .warning)
         case "sensor-unavailable":
             self.init(title: "센서 오류 · macOS 에 반납", detail: "온도를 읽지 못해 macOS 가 팬을 관리합니다", tone: .warning)
         case "invalid":
             self.init(title: "비정상 값 · 팬 100%", detail: "설정 값을 확인하세요", tone: .danger)
         case "system":
-            self.init(title: "macOS 자동 제어", detail: "\(temp) — MacPit 은 관여하지 않습니다", tone: .idle)
+            self.init(title: "macOS 자동 제어",
+                      detail: d.config.systemSafety ? "\(temp) — 안전 온도 \(Int(d.config.safetyTemp))°C 이상에서만 MacPit 이 개입"
+                                                    : "\(temp) — MacPit 은 관여하지 않습니다", tone: .idle)
         case "manual":
             self.init(title: "수동 \(pct) 고정", detail: "\(temp) — 온도와 무관하게 고정 (안전 온도 초과 시 100%)", tone: .active)
         case "curve":

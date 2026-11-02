@@ -181,6 +181,27 @@ final class Monitor: ObservableObject {
         }
     }
 
+    /// 팬을 macOS 에 반납(mode=system)하고 종료. 데몬이 받아들인 걸 확인한 뒤에만 종료 — 실패하면 사유를 보여주고 앱 유지
+    func releaseAndQuit() {
+        var c = daemon?.config ?? config
+        c.mode = .system
+        configDirty = true
+        io.async {
+            let result = Result { try DaemonClient.send(DaemonRequest(cmd: "setConfig", config: c)) }
+            Task { @MainActor in
+                self.configDirty = false
+                switch result {
+                case .success(let r) where r.ok && r.status?.config.mode == .system:
+                    NSApp.terminate(nil)
+                case .success(let r):
+                    self.configError = "반납 실패: \(r.error ?? "데몬이 설정을 바꾸지 않음") — 앱을 종료하지 않았습니다"
+                case .failure(let e):
+                    self.configError = "반납 실패 — \(DaemonClient.describe(e)) · 앱을 종료하지 않았습니다"
+                }
+            }
+        }
+    }
+
     var menuTitle: String {
         barItems.compactMap { item -> String? in
             switch item {
