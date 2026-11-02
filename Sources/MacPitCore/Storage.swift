@@ -26,13 +26,33 @@ public struct CleanTarget: Identifiable, Sendable {
     public let dockerType: String?      // `docker system df` 의 Type
 }
 
-/// 정리 대상을 쓰는 중인 프로세스 (pgrep -f 확장 정규식). 자동 정리는 실행 중이면 건너뛴다.
+/// 디렉터리 열거가 권한(TCC)으로 막혔을 때 안내. 앱은 이 문구가 있으면 설정 열기 버튼을 보여준다
+public let fullDiskAccessHint = "권한 부족 — 시스템 설정 > 개인정보 보호 및 보안 > 전체 디스크 접근 권한에서 MacPit 허용 필요"
+public let fullDiskAccessSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+
+/// 정리 대상을 쓰는 중인 프로세스 (pgrep -f 확장 정규식, 전체 커맨드라인 대상). 자동 정리는 실행 중이면 건너뛴다.
+/// 여기 없는 대상은 자동 정리에서 제외된다(fail-safe) — 새 safe 대상을 추가하면 감지 규칙도 같이 넣을 것.
+private let xcodeProc = "Xcode\\.app/Contents/MacOS/Xcode|(^|/)xcodebuild( |$)"
 public let cleanTargetUsers: [String: (label: String, pattern: String)] = [
+    // npm·pnpm·yarn 은 보통 `node /opt/homebrew/bin/npm install` 꼴로 보인다
+    "npm": ("npm", "(^|/)(npm|npx)( |$)|/np[mx]-cli\\.js"),
+    "pnpm": ("pnpm", "(^|/)(pnpm|pnpx)( |$)|/pnpm\\.c?js"),
+    "yarn": ("Yarn", "(^|/)yarn( |$)|/yarn(-[0-9.]+)?\\.c?js"),
+    "bun": ("Bun", "(^|/)(bun|bunx)( |$)"),
+    "node-gyp": ("node-gyp", "node-gyp"),
+    "browsers": ("Playwright·Puppeteer", "ms-playwright|playwright|puppeteer"),
     "gradle": ("Gradle", "GradleDaemon|GradleWrapperMain|GradleMain"),
     "jetbrains": ("JetBrains IDE", "\\.app/Contents/MacOS/(idea|pycharm|webstorm|goland|clion|rider|datagrip|phpstorm|rubymine|rustrover|studio)( |$)"),
-    "xcode": ("Xcode", "Xcode\\.app/Contents/MacOS/Xcode"),
+    "xcode": ("Xcode·xcodebuild", xcodeProc),
+    "xcode-device": ("Xcode·시뮬레이터", xcodeProc + "|Simulator\\.app/Contents/MacOS/Simulator|(^|/)launchd_sim( |$)"),
+    "spm": ("SwiftPM·CocoaPods", xcodeProc + "|(^|/)swift-(build|package|test|run)( |$)|(^|/)pod( |$)"),
+    "python": ("pip·uv", "(^|/)(pip[0-9.]*|uv|uvx)( |$)|-m pip( |$)"),
+    "go": ("Go", "(^|/)go (build|test|run|install|mod|get|vet|generate)( |$)"),
+    "cargo": ("Cargo", "(^|/)(cargo|rustc)( |$)"),
+    "brew": ("Homebrew", "Library/Homebrew/brew\\.(sh|rb)"),
     "vscode": ("VS Code", "Visual Studio Code\\.app/Contents/MacOS/"),
     "maven": ("Maven", "org\\.codehaus\\.plexus\\.classworlds"),
+    "docker-build": ("docker build", "(^|/)docker .*(build|bake)( |$)|docker-buildx"),
 ]
 
 public let cleanTargets: [CleanTarget] = [
@@ -187,6 +207,14 @@ public final class StorageCleaner: @unchecked Sendable {
         return run("/usr/bin/pgrep", ["-f", u.pattern], timeout: 5).status == 0 ? u.label : nil
     }
 
+    /// 무인 자동 정리에서 건너뛸 사유. nil = 진행 가능.
+    /// 실행 중 감지 규칙이 없는 대상은 안전을 보장할 수 없어 제외 (수동 정리만 허용)
+    public func autoCleanSkipReason(_ t: CleanTarget) -> String? {
+        guard t.risk == .safe else { return "주의 항목은 자동 정리 안 함" }
+        guard cleanTargetUsers[t.id] != nil else { return "실행 중 감지 규칙이 없어 자동 정리 제외" }
+        return busyUser(t).map { "\($0) 실행 중이라 건너뜀" }
+    }
+
     public func clean(_ t: CleanTarget) -> CleanOutcome {
         switch t.action {
         case .docker(let args):
@@ -223,7 +251,20 @@ public final class StorageCleaner: @unchecked Sendable {
             let (u, rejected) = resolve(p)
             if rejected { errors.append("거부된 경로(home 밖): \(p)") }
             guard let root = u else { continue }
-            guard let items = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: []) else { continue }
+            let items: [URL]
+            do { items = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: []) }
+            catch {
+                // 경로 없음은 정상(지울 것 없음). 그 외(권한 부족 등)는 '0 확보 성공'으로 숨기지 않는다
+                let ns = error as NSError
+                let posix = (ns.userInfo[NSUnderlyingErrorKey] as? NSError).flatMap { $0.domain == NSPOSIXErrorDomain ? $0.code : nil }
+                if ns.code == NSFileReadNoSuchFileError || posix == Int(ENOENT) || posix == Int(ENOTDIR) { continue }
+                if ns.code == NSFileReadNoPermissionError || posix == Int(EPERM) || posix == Int(EACCES) {
+                    errors.append("\(p): \(fullDiskAccessHint)")
+                } else {
+                    errors.append("\(p): \(error.localizedDescription)")
+                }
+                continue
+            }
             for item in items {
                 let size = directorySize(item)
                 do { try fm.removeItem(at: item); freed += size }   // 심볼릭 링크는 링크만 삭제됨
