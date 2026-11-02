@@ -129,6 +129,7 @@ sudo ./scripts/install.sh   # 팬 제어 데몬 + ~/Applications/MacPit.app + �
 | 기종 | 칩 | 팬 | 결과 |
 |---|---|---|---|
 | `MacBookPro18,1` | M1 Pro | 2 | 수동·프로필·목표온도·반납 확인 |
+| `Mac15,6` | M3 Pro | 2 | 수동·반납·비정상 종료 후 복구 확인 (`Ftst` 잠금 해제 필요) |
 
 그 외 기종은 팬 제어가 **실험적**이다 (패널에 "미검증 기종" 표시). 칩마다 SMC 키 배치가 달라질 수 있다.
 [기종 제보](https://github.com/mkhwang/macpit/issues/new?template=device-report.yml) 에 `macpitctl sensors` 출력을 붙여 주면 표에 추가한다.
@@ -174,7 +175,10 @@ Apple Silicon 에서는 SMC 키로 팬을 제어한다.
 2. 제어 중에는 매 1초 `Md=1` 확인 후 `Tg` 기록 (macOS 가 모드를 되돌릴 수 있어서 재기록)
 3. 반납 시 원래 `Md` 로 복원 → macOS 가 다시 관리
 
+M3 이상(`Mac15,6` 확인)은 팬이 멈춘 idle 상태에서 `Md=3` 이고, 이때 `Md` 쓰기가 SMC `0x82` 로 거부된다. 이 경우 `Ftst=1`(진단 잠금 해제)을 쓰고 `Md` 가 0 으로 내려와 팬이 돌기 시작할 때까지(실측 약 6초) 매 틱 재시도한다. 반납은 `Md=0` → `Ftst=0` 순서로 쓰면 macOS 가 2~3초 안에 `Md=3` 으로 회수한다.
+
 실측 (MacBook Pro M1 Pro, `MacBookPro18,1`): 수동 60% 지정 시 약 6초 만에 0 → 3180 / 3440 rpm, 반납 시 `Md=3` 복원.
+실측 (MacBook Pro M3 Pro, `Mac15,6`): idle 에서 수동 60% 지정 시 약 6초 만에 `Ftst` 해제 → 0 → 5000 rpm, 반납 시 약 2초 만에 `Md=3` 복원.
 
 ## 센서 그룹 정의
 
