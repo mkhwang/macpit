@@ -7,8 +7,32 @@ import MacPitCore
 
 let version = macpitDaemonVersion
 setvbuf(stdout, nil, _IOLBF, 0)
+// 응답 전에 끊긴 클라이언트에 write → SIGPIPE 기본 동작(종료)이면 팬 반납 없이 죽는다
+signal(SIGPIPE, SIG_IGN)
 
+let logPath = "/var/log/macpitd.log"
+/// launchd 가 stdout 을 로그 파일로 열어준 경우에만 회전 추적 (터미널 실행 시 stdout 을 가로채지 않음)
+let logFollowsFile: Bool = {
+    var a = stat(), b = stat()
+    return fstat(1, &a) == 0 && stat(logPath, &b) == 0 && a.st_ino == b.st_ino && a.st_dev == b.st_dev
+}()
+
+/// newsyslog 가 파일을 rename·압축하면 stdout/stderr fd 는 옛 inode 를 가리킨 채 남는다 → 경로의 inode 가 바뀌면 다시 연다
+func reopenLogIfRotated() {
+    guard logFollowsFile else { return }
+    var a = stat(), b = stat()
+    if fstat(1, &a) == 0, stat(logPath, &b) == 0, a.st_ino == b.st_ino, a.st_dev == b.st_dev { return }
+    let fd = open(logPath, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+    guard fd >= 0 else { return }
+    fflush(stdout)
+    dup2(fd, 1); dup2(fd, 2)   // stderr(크래시 메시지 등)도 새 파일로
+    close(fd)
+}
+
+let logLock = NSLock()
 func log(_ s: String) {
+    logLock.lock(); defer { logLock.unlock() }
+    reopenLogIfRotated()
     let ts = ISO8601DateFormatter().string(from: Date())
     print("[\(ts)] \(s)")
 }
@@ -32,7 +56,10 @@ final class State: @unchecked Sendable {
     let lock = NSLock()
     var config = FanConfig()
     var engine = FanPolicyEngine()
+    /// SMC 팬 상태를 바꿨을 수 있음(쓰기 시도 포함) → 반납이 끝까지 성공해야 false
     var forced = false
+    /// Ftst(진단 잠금) 해제를 요청한 시각. M3+ 에서 Md 쓰기가 허용되기까지 수 초 걸림
+    var unlockSince: Date?
     /// 종료 중: tick 이 반납 이후 다시 강제 모드를 쓰지 않도록
     var shuttingDown = false
     var lastDecision = FanDecision(percent: nil, reason: "init")
@@ -63,17 +90,53 @@ let originalModes: [Int: Double] = Dictionary(uniqueKeysWithValues: ctlFans.map 
 })
 log("original fan modes: \(originalModes)")
 
-/// lock 보유 상태에서 호출
-func releaseFans() {
-    for f in ctlFans {
-        let i = f.index
-        do { try smc.write("F\(i)Md", value: originalModes[i] ?? 0) } catch { state.lastError = "release F\(i): \(error)" }
+// M3 이상(Mac15,6 등)은 시스템 관리 중 Md=3 이고, 그 상태의 Md 쓰기는 0x82(→0x1082)로 거부된다.
+// Ftst=1(진단 잠금 해제)을 쓰면 수 초 뒤 Md 가 0 으로 내려오고 그때부터 Md=1 쓰기가 허용된다.
+// 반납은 Md=3 직접 쓰기가 거부되므로 Md=0 → Ftst=0 순서로 쓰고, 시스템이 스스로 Md=3 으로 회수한다.
+let hasFtst = smc.double("Ftst") != nil
+/// Ftst=1 이후 Md 쓰기가 허용될 때까지 기다리는 상한 (Mac15,6 실측 ~5.6초)
+let unlockGrace: TimeInterval = 15
+
+func isNotWritable(_ e: Error) -> Bool {
+    if case let SMCError.code(c, _) = e { return c == 0x1082 }
+    return false
+}
+
+/// lastError 갱신 + 변화가 있을 때만 로그 (매 틱 재시도해도 로그가 넘치지 않게). lock 보유 상태에서 호출
+func setError(_ e: String?) {
+    if e != state.lastError {
+        if let e { log("error: \(e)") } else if state.lastError != nil { log("error cleared") }
     }
-    state.forced = false
+    state.lastError = e
+}
+
+/// lock 보유 상태에서 호출. 전부 성공해야 forced=false — 실패하면 다음 틱에 다시 시도
+func releaseFans() {
+    var errs: [String] = []
+    if hasFtst && (state.unlockSince != nil || smc.double("Ftst") == 1) {
+        for f in ctlFans { try? smc.write("F\(f.index)Md", value: 0) }
+        do {
+            try smc.write("Ftst", value: 0)
+            if state.unlockSince != nil { log("Ftst=0 — 팬 제어 시스템 반납") }
+            state.unlockSince = nil
+        } catch { errs.append("release Ftst: \(error)") }
+    } else {
+        for f in ctlFans {
+            let i = f.index
+            let orig = originalModes[i] ?? 0
+            if smc.double("F\(i)Md") == orig { continue }   // 이미 원래 모드 (쓰기 거부 기기에서 헛된 실패 방지)
+            do { try smc.write("F\(i)Md", value: orig) } catch { errs.append("release F\(i): \(error)") }
+        }
+    }
+    state.forced = !errs.isEmpty
+    setError(errs.isEmpty ? nil : errs.joined(separator: "; "))
 }
 
 /// lock 보유 상태에서 호출
 func applyPercent(_ p: Double) {
+    // 쓰기를 시도하는 순간부터 반납 대상 (일부 팬만 바뀌었거나 Ftst 만 바뀐 상태도 되돌려야 함)
+    state.forced = true
+    var errs: [String] = []
     // 팬마다 Mn/Mx 가 다르므로 같은 % 를 팬별 RPM 으로 환산
     for f in ctlFans {
         let i = f.index
@@ -83,14 +146,27 @@ func applyPercent(_ p: Double) {
         let rpm = percentToRPM(p, min: mn, max: mx)
         do {
             // thermalmonitord 가 모드를 되돌릴 수 있어서 매 틱 확인 후 재기록
-            if (smc.double("F\(i)Md") ?? -1) != 1 { try smc.write("F\(i)Md", value: 1) }
+            if (smc.double("F\(i)Md") ?? -1) != 1 {
+                do {
+                    try smc.write("F\(i)Md", value: 1)
+                } catch where hasFtst && isNotWritable(error) {
+                    if smc.double("Ftst") != 1 {
+                        try smc.write("Ftst", value: 1)
+                        log("Ftst=1 — 팬 제어 잠금 해제 요청")
+                        state.unlockSince = Date()
+                    }
+                    let since = state.unlockSince ?? Date()
+                    state.unlockSince = since
+                    if Date().timeIntervalSince(since) < unlockGrace { continue }   // 해제 대기 중: 다음 틱에 재시도
+                    throw error
+                }
+            }
             try smc.write("F\(i)Tg", value: rpm)
-            state.lastError = nil
         } catch {
-            state.lastError = "apply F\(i): \(error)"
+            errs.append("apply F\(i): \(error)")
         }
     }
-    state.forced = true
+    setError(errs.isEmpty ? nil : errs.joined(separator: "; "))
 }
 
 func tick() {
@@ -198,9 +274,22 @@ log("listening \(daemonSocketPath) owner uid=\(ownerUID)")
 
 let connSlots = DispatchSemaphore(value: 4)
 DispatchQueue.global().async {
+    var lastAcceptErrno: Int32 = 0
     while true {
         let cfd = accept(sfd, nil, nil)
-        if cfd < 0 { continue }
+        if cfd < 0 {
+            // EMFILE 등 지속 실패 시 busy loop(CPU 100%) 방지
+            let e = errno
+            if e != EINTR && e != ECONNABORTED {
+                if e != lastAcceptErrno { log("accept failed errno=\(e)") }
+                lastAcceptErrno = e
+                usleep(200_000)
+            }
+            continue
+        }
+        lastAcceptErrno = 0
+        var one: Int32 = 1
+        setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         // 동시 처리 상한: 느린/악성 클라이언트가 GCD 스레드를 고갈시키지 못하게. 초과분은 즉시 닫음
         guard connSlots.wait(timeout: .now()) == .success else { close(cfd); continue }
         DispatchQueue.global().async { handle(cfd); connSlots.signal() }

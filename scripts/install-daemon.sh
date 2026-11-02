@@ -51,7 +51,7 @@ chown root:wheel "$PLIST"; chmod 644 "$PLIST"
 # 로그 회전: 1MB 넘으면 압축, 3개 보관
 cat > /etc/newsyslog.d/macpitd.conf <<NS
 # logfilename          [owner:group]  mode count size(KB) when flags
-/var/log/macpitd.log   root:wheel     644  3     1024     *    J
+/var/log/macpitd.log   root:wheel     644  3     1024     *    JN
 NS
 chmod 644 /etc/newsyslog.d/macpitd.conf
 launchctl bootstrap system "$PLIST"
